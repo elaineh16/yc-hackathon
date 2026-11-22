@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Super — Manager Dashboard (fallback)</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1b1b1b; --muted:#6b6b6b; --line:#e3e0da; --accent:#2f6fde; --red:#d64545; --green:#2f9e5b; --amber:#d99a1e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 -apple-system, system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:12px; padding:16px 24px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { font-size:18px; margin:0; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  main { display:grid; grid-template-columns: 1fr 420px; height: calc(100vh - 58px); }
+  .board { display:grid; grid-template-columns: repeat(5, minmax(150px,1fr)); gap:12px; padding:16px; overflow:auto; }
+  .col h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer; transition: box-shadow .2s; }
+  .card:hover, .card.sel { box-shadow: 0 0 0 2px var(--accent); }
+  .card .t { font-weight:600; }
+  .card .m { color:var(--muted); font-size:12px; }
+  .u-emergency { border-left:4px solid var(--red); } .u-urgent { border-left:4px solid var(--amber); } .u-routine { border-left:4px solid var(--line); }
+  aside { border-left:1px solid var(--line); background:var(--card); overflow:auto; padding:16px 20px; }
+  aside h3 { margin:0 0 4px; }
+  .call { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:10px 0; }
+  .call .h { display:flex; justify-content:space-between; font-weight:600; }
+  .oc { font-size:12px; padding:1px 8px; border-radius:999px; background:#eee; }
+  .oc.accepted,.oc.confirmed,.oc.ticket_created { background:#e2f4e9; color:var(--green); }
+  .oc.declined,.oc.no_answer,.oc.failed { background:#fbe7e7; color:var(--red); }
+  .oc.in_progress { background:#e6eefc; color:var(--accent); }
+  details { margin-top:6px; } .line { margin:2px 0; } .line b { text-transform:capitalize; }
+  .empty { color:var(--muted); padding:24px; }
+</style>
+</head>
+<body>
+<header><h1>Super</h1><span class="pill" id="mode">…</span><span class="pill">Fallback dashboard · updates every 2s</span></header>
+<main>
+  <section class="board" id="board"></section>
+  <aside id="detail"><div class="empty">Select a ticket</div></aside>
+</main>
+<script>
+const COLS = [
+  ["New / Dispatching", ["new","dispatching"]],
+  ["Booked", ["booked"]],
+  ["Confirmed", ["confirmed","done"]],
+  ["Escalated", ["escalated"]],
+  ["Needs human", ["needs_human"]],
+];
+let selected = null, tickets = [];
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ago = iso => { const s = Math.round((Date.now() - new Date(iso)) / 1000); return s < 60 ? s+"s ago" : Math.round(s/60)+"m ago"; };
+
+async function refresh() {
+  try {
+    const [st, ts] = await Promise.all([fetch("/api/status").then(r=>r.json()), fetch("/api/tickets").then(r=>r.json())]);
+    document.getElementById("mode").textContent = st.dryRun ? "DRY RUN" : "LIVE CALLS";
+    tickets = ts; render();
+  } catch (e) { console.error(e); }
+}
+function render() {
+  document.getElementById("board").innerHTML = COLS.map(([name, sts]) => {
+    const items = tickets.filter(t => sts.includes(t.status));
+    return `<div class="col"><h2>${name} (${items.length})</h2>${items.map(t => `
+      <div class="card u-${t.urgency} ${t.id===selected?"sel":""}" onclick="select('${t.id}')">
+        <div class="t">Unit ${esc(t.unit)} · ${esc(t.category)}</div>
+        <div>${esc(t.summary)}</div>
+        <div class="m">${esc(t.urgency)} · ${ago(t.createdAt)}${t.slot ? " · "+esc(t.slot) : ""}</div>
+      </div>`).join("")}</div>`;
+  }).join("");
+  const t = tickets.find(x => x.id === selected);
+  const d = document.getElementById("detail");
+  if (!t) { d.innerHTML = '<div class="empty">Select a ticket</div>'; return; }
+  const open = new Set([...d.querySelectorAll("details[open]")].map(x => x.dataset.id));
+  d.innerHTML = `<h3>Unit ${esc(t.unit)} · ${esc(t.tenantName)}</h3>
+    <div class="m">${esc(t.status)} · ${esc(t.urgency)} ${esc(t.category)}</div>
+    <p>${esc(t.summary)}<br><span class="m">Where: ${esc(t.location)} · Access: ${esc(t.accessWindows)}</span></p>
+    ${t.contractor ? `<p><b>${esc(t.contractor.name)}</b> (${esc(t.contractor.company)}) · ${esc(t.slot)} · ${esc(t.quote)}</p>` : ""}
+    <h4>Call timeline</h4>
+    ${t.calls.map(c => `<div class="call">
+      <div class="h"><span>${esc(c.agent)} → ${esc(c.counterpartName)}</span><span class="oc ${esc(c.outcome)}">${esc(c.outcome)}</span></div>
+      <div class="m">${new Date(c.startedAt).toLocaleTimeString()} · ${esc(c.counterpartPhone)}</div>
+      ${c.summary ? `<div>${esc(c.summary)}</div>` : ""}
+      ${c.recordingUrl ? `<audio controls src="${esc(c.recordingUrl)}"></audio>` : ""}
+      ${c.transcript.length ? `<details data-id="${c.id}" ${open.has(c.id)?"open":""}><summary>Transcript</summary>${c.transcript.map(l => `<div class="line"><b>${esc(l.role)}:</b> ${esc(l.message)}</div>`).join("")}</details>` : ""}
+    </div>`).join("") || '<div class="m">No calls yet</div>'}`;
+}
+function select(id) { selected = id; render(); }
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
