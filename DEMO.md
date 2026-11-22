@@ -20,6 +20,12 @@ ElevenLabs answers. Relay asks only for missing information (maximum three clari
 
 Relay confirms the details, checks for an existing report, and opens or updates the work order. **Dashboard:** new/updated ticket appears. Safety hazards go to a human immediately.
 
+Once Relay knows which washer it is, it pages the residence front desk. It asks for an authorized staff member to meet the student at washer 2 and retrieve the clothes if they can do so safely. Contractor outreach starts in parallel.
+
+> **Relay:** “Please leave the door closed. I've asked residence staff to meet you at the washer. I'll text you when they confirm.”
+
+For the demo, a staff stand-in accepts and gives a 15-minute ETA. Relay texts the student, and staff mark the clothes retrieved once they've helped. If staff are unavailable or can't open the washer safely, Relay updates the student and asks the contractor to handle retrieval at the earliest available visit.
+
 ## 2. Relay contacts contractors
 
 The Maritime coordination agent finds approved test contractors and triggers three ElevenLabs/Twilio calls:
@@ -36,7 +42,7 @@ The Maritime coordination agent finds approved test contractors and triggers thr
 
 Relay compares **availability, total known cost, and scope**. It recommends Bluejay for a non-emergency because it offers a next-day slot and a conditional repair estimate; QuickFix is faster but only quotes diagnosis.
 
-Relay calls the student back with a brief update. The student can express a preference, but **cannot authorize building spending**.
+Relay calls the student back with the repair options and the latest staff update. The student can express a preference, but **cannot authorize building spending**.
 
 ## 4. Manager approves; Relay books
 
@@ -44,7 +50,7 @@ Bluejay's **$329 pre-tax estimate exceeds the $250 auto-approval threshold**. Re
 
 The manager approves in the dashboard. Relay confirms the appointment with the stand-in contractor, records the confirmed time, and notifies the student.
 
-**Final dashboard:** ticket → contractor options → manager approval → confirmed appointment. Do not call a booking confirmed until the contractor actually confirms it.
+**Final dashboard:** staff assistance → clothes retrieved. Repair → contractor options → manager approval → confirmed appointment. Do not call a booking confirmed until the contractor actually confirms it.
 
 ## What the judges should see
 
