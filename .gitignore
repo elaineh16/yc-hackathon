@@ -1,6 +1,14 @@
 node_modules/
-.env
 backend/data/
 dist/
 .DS_Store
 .wasp/
+__pycache__/
+.venv/
+*.db
+
+# Secrets: never commit real env files
+.env
+.env.*
+*.env
+!.env.example
