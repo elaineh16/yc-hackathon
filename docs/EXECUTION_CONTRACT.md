@@ -67,7 +67,7 @@ The $329 estimate exceeds the $250 auto-approval threshold. Manager approves a $
 ## 5. TraceRoot implementation ownership
 
 Backend owner:
-1. Run the TraceRoot CLI setup from repo root after the Wasp scaffold exists: `npx -y traceroot-cli@latest setup` (Node.js 20.12+).
+1. Use Node.js >=24.22.1 for the current Wasp CLI (this also exceeds TraceRoot CLI's Node.js 20.12 minimum). From the repository root on `feat/wasp-core`, install Wasp and create the scaffold with `npm i -g @wasp.sh/wasp-cli@latest`, `wasp new dashboard -t minimal`, then `cd dashboard && wasp start`. After the scaffold starts, return to the repository root and run `npx -y traceroot-cli@latest setup`.
 2. Review the generated TypeScript SDK setup. Initialize once in the Wasp Node server startup.
 3. Instrument agent/tool and workflow boundaries listed in `docs/TRACEROOT.md`; do not assume ElevenLabs' hosted model internals are automatically visible.
 4. Keep keys server-only, redact user content, and make trace export fail-open.

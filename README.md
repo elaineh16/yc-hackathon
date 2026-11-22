@@ -26,9 +26,22 @@ Both work in the same Wasp app on separate branches: `feat/wasp-core` and `feat/
 
 ## Setup
 
-Use WSL/Linux and Node.js 20.12 or later. Build the Wasp scaffold first, then configure TraceRoot from the repository root:
+Use WSL/Linux and **Node.js >=24.22.1**. This is the current Wasp CLI requirement and also exceeds TraceRoot CLI's Node.js 20.12 minimum.
+
+From the repository root on `feat/wasp-core`:
 
 ```bash
+npm i -g @wasp.sh/wasp-cli@latest
+wasp version
+wasp new dashboard -t minimal
+cd dashboard
+wasp start
+```
+
+After the Wasp scaffold starts, return to the repository root and configure TraceRoot:
+
+```bash
+cd ..
 npx -y traceroot-cli@latest setup
 ```
 
