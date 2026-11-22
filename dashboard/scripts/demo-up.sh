@@ -13,17 +13,27 @@ BUILD="${RELAY_BUILD_DIR:-$HOME/relay-build/dashboard}"      # Linux-side copy: 
 TUNNEL="relay-tunnel"
 
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null; fi
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # nvm is not written for "set -eu": load and use it with those checks off.
+  set +eu
+  . "$NVM_DIR/nvm.sh"
+  nvm use 24 >/dev/null
+  set -eu
+fi
 command -v wasp >/dev/null || { echo "Wasp CLI not found. Run: npm i -g @wasp.sh/wasp-cli@0.22.0"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "Docker is not running. Start Docker Desktop, then run this again."; exit 1; }
 [ -f "$APP_SRC/.env.server" ] || { echo "Missing $APP_SRC/.env.server (copy .env.server.example and fill it in)."; exit 1; }
 
+# No pipes into "grep -q" here: under pipefail a closed pipe can make a successful match look like a failure.
+db_running() { [ -n "$(docker ps -q --filter 'name=^wasp-dev-db-relay')" ]; }
+
 # 1. Database: reuse the existing dev container and its data.
-if ! docker ps --format '{{.Names}}' | grep -q '^wasp-dev-db-relay'; then
+if ! db_running; then
   echo "Starting Postgres..."
   mkdir -p "$BUILD"
   (cd "$BUILD" && nohup wasp start db > "$HOME/relay-build/db.log" 2>&1 &)
-  for _ in $(seq 1 45); do docker ps --format '{{.Names}}' | grep -q '^wasp-dev-db-relay' && break; sleep 2; done
+  for _ in $(seq 1 45); do db_running && break; sleep 2; done
+  db_running || { echo "Postgres did not start. See $HOME/relay-build/db.log"; exit 1; }
 fi
 
 # 2. Public HTTPS tunnel to the dev server (port 3000 forwards /api, /operations and /health to the Wasp server).
