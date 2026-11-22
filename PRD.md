@@ -74,13 +74,13 @@
 | Workstream | Owner | Owns |
 | --- | --- | --- |
 | V: Voice | (name) | The ElevenLabs agents (three, plus Confirm at P1), voice and turn settings, tool config, phone number, post-call analysis config, scenario tests |
-| C: Core | Lovina | relay-core: data model, tool endpoints, orchestrator, scoring, webhooks, live stream, deploy on Maritime |
+| C: Core | Lovina | Wasp server: data model, tool endpoints, orchestrator, scoring, webhooks, live stream, deploy on Maritime |
 | I: Integrations | (name) | Fiber sourcing, alter policy and booking path, traceroot, email and SMS |
-| D: Console and demo | (name) | Next.js console, assistant-ui chat, demo-mode UX, stand-in scripts, video, submission |
+| D: Console and demo | (name) | Wasp React console, assistant-ui chat, demo-mode UX, stand-in scripts, video, submission |
 
 | By | Checkpoint | Proof |
 | --- | --- | --- |
-| 12:05 PM | Setup | Keys in a shared `.env`; repo; Maritime `/health` URL; three agents exist; phone number imported; contracts in section 7 frozen |
+| 12:05 PM | Setup | Wasp server environment configured locally and on Maritime, including `DATABASE_URL`; repo; Maritime `/health` URL; three agents exist; phone number imported; contracts in section 7 frozen |
 | 12:20 PM | CP1: skeleton walks | `/api/demo/simulate` streams a fake job to the console; a real inbound call creates a work order |
 | 12:55 PM | CP2: phones ring | `start_sourcing` places three calls to the stand-in phones; quotes land in the table; voicemail is detected |
 | 1:25 PM | CP3: loop closes | Scoring, callback call, decision, approval, booking, notification |
@@ -106,23 +106,27 @@ Contractor phones <-> Twilio number <-> ElevenLabs  Agent B Vendor Caller (outbo
                                             |  server tools: HTTPS calls during the conversation
                                             |  post-call webhook: transcript + analysis after hang-up
                                             v
-relay-core: FastAPI + SQLite, one Maritime agent box with a public URL
+relay-core: Wasp Node.js/Express server on a Maritime agent box with a public URL
+   Prisma        PostgreSQL for work orders, events and timers
    orchestrator   state machine, scoring, timers, demo mode
    Fiber AI       vendor search and enrichment
    alter          proxy for bookings (and outbound dials, P1); approvals; authorization audit
    traceroot      one session per work order, one span per step
    Resend, Twilio SMS   notifications to customer and contractor
    Maritime       /chat for messages and scheduled ticks, /schedules for wake-ups
-   SSE            live events to the console (Next.js on Vercel) and the "Ask Relay" chat (assistant-ui)
+   SSE            live events to the Wasp React console
+   POST /api/chat  streams "Ask Relay" responses to assistant-ui
 
 Bookings API (POST /internal/book/*): the protected resource. Only alter can produce its keys.
 ```
 
-**Three records, linked by ****`work_order_id`**
+Build one full-stack Wasp app in `dashboard/`, using the Open SaaS starter if useful. Wasp routes own the console and tracking pages. Wasp custom HTTP APIs own the voice tools, webhooks, bookings, Maritime endpoints and streaming routes in section 7. Serve the Wasp client build as a static site and point it at the Maritime-hosted Wasp server. Use the [Wasp API guide](https://wasp.sh/docs/features/apis) and [deployment overview](https://wasp.sh/docs/deployment/overview).
+
+**Three records linked by `work_order_id`**
 
 | Record | Question it answers | Where |
 | --- | --- | --- |
-| Events | What happened, in order, in plain words | SQLite; the console timeline; the chat reads it |
+| Events | What happened, in order, in plain words | PostgreSQL, the console timeline and Ask Relay |
 | Trace | How it ran: timings, retries, errors | traceroot |
 | Authorization audit | What Relay was allowed to do and who approved it | alter |
 
@@ -160,7 +164,7 @@ Call:        queued -> dialing -> live <-> on_hold -> done
 | Calling hours | 08:00 to 20:00 local unless emergency | Off |
 | Follow-up | 08:00 the morning after the visit | "Simulate tomorrow" button |
 
-**Timers.** Each timer is a row (`kind`, `due_at`, `work_order_id`, `done`). While the box is awake, an asyncio loop checks for due rows every 2 seconds. A sleeping Maritime box does not fire in-process timers, so `GET /schedules` publishes a once-a-minute "tick" whenever a timer is pending. Maritime wakes the box and posts the tick to `/chat`, and the handler runs whatever is due. On startup, re-arm from the table.
+**Timers.** Each timer is a PostgreSQL row (`kind`, `due_at`, `work_order_id`, `done`). Start a Node.js timer check in Wasp server setup and check for due rows every 2 seconds while the box is awake. A sleeping Maritime box does not fire in-process timers, so `GET /schedules` publishes a once-a-minute "tick" whenever a timer is pending. Maritime wakes the box and posts the tick to `/chat`. Both paths use the same runner and claim due rows in the database so they cannot run the same timer concurrently. On startup, resume from the table.
 
 ## 7. Contracts (freeze by 12:05)
 
@@ -231,11 +235,12 @@ GET  /schedules                [{"id":"tick","cron":"* * * * *","tz":"America/To
 # Console
 GET  /api/work_orders          GET /api/work_orders/{id}    full snapshot: order, vendors, calls, quotes, approval, booking, events
 GET  /api/stream               SSE, one message per Event row
+POST /api/chat                 Ask Relay streaming endpoint (P1)
 POST /api/demo/reset           POST /api/demo/simulate      POST /api/work_orders/{id}/followup_now
 POST /api/work_orders/{id}/approve     only when APPROVAL_BACKEND=local
 ```
 
-**Rules for every endpoint.** Validate with pydantic. On bad input return `{ok: false, say: "..."}` so the agent recovers out loud instead of going silent. `submit_quote`, `record_decision`, `vendor_ack` and both booking routes are upserts keyed on the work order (and vendor).
+**Rules for every endpoint.** Validate inputs with Zod in Wasp custom API handlers. For invalid voice tool input, return `{ok: false, say: "..."}` so the agent recovers out loud. `submit_quote`, `record_decision`, `vendor_ack` and both booking routes are upserts keyed on the work order (and vendor). Use per-route middleware to preserve the raw request body for ElevenLabs signature verification.
 
 ### Event types
 
@@ -255,7 +260,10 @@ Send every dynamic variable the agent defines, every time; a missing one fails t
 ### Environment
 
 ```txt
-PUBLIC_BASE_URL=                      # Maritime public URL
+PUBLIC_BASE_URL=                      # Maritime public URL for the Wasp server
+WASP_SERVER_URL=                      # same URL as PUBLIC_BASE_URL in production
+WASP_WEB_CLIENT_URL=                  # deployed Wasp console URL
+DATABASE_URL=                         # PostgreSQL connection string
 RELAY_TOOL_SECRET=                    # X-Relay-Secret for tool calls
 ELEVENLABS_API_KEY=  EL_WEBHOOK_SECRET=  EL_PHONE_NUMBER_ID=
 EL_AGENT_INTAKE_ID=  EL_AGENT_VENDOR_ID=  EL_AGENT_CALLBACK_ID=  EL_AGENT_CONFIRM_ID=
@@ -271,7 +279,7 @@ DEMO_MODE=true
 DEMO_VENDOR_PHONES=+1...,+1...,+1...
 DEMO_ALLOWLIST=+1...,+1...,+1...,+1...   # every number Relay may dial
 HUMAN_ESCALATION_PHONE=+1...
-AUTO_APPROVE_LIMIT=250  HARD_CAP=1000  TZ=America/Toronto  DB_PATH=/data/relay.db
+AUTO_APPROVE_LIMIT=250  HARD_CAP=1000  TZ=America/Toronto
 ```
 
 ## 8. Each tool, used properly
@@ -316,7 +324,7 @@ AUTO_APPROVE_LIMIT=250  HARD_CAP=1000  TZ=America/Toronto  DB_PATH=/data/relay.d
 - **Speed.** Cache per trade and city for an hour. Start the search in the background the moment `create_work_order` lands, so results are ready when `start_sourcing` is called.
 - **Demo mode.** The real Fiber results are shown as found. The three vendors Relay dials are stand-ins with invented names and our own phone numbers. No invented quote is ever shown next to a real company's name.
 - **Verify first.** Does a search return at least five local trade companies with phone numbers? Check credits with `GET /v1/get-org-credits`. If coverage is thin, keep a `seed_vendors.json` for discovery and use Fiber for enrichment.
-- **Claude Code.** Copy the skills from the [fiber-ai-plugin repo](https://github.com/fiber-ai/fiber-ai-plugin/tree/main/skills) (setup, quickstart, search, enrich, sdk-py), or `pip install fiberai`.
+- **Implementation.** Call Fiber's HTTP API with `fetch` from a Wasp server module. The [Fiber skills](https://github.com/fiber-ai/fiber-ai-plugin/tree/main/skills) cover setup, search and enrichment.
 
 ### alter: Relay's spending and dialling authority
 
@@ -340,25 +348,26 @@ alter managed-secrets set-allowed-hosts <provider> --host <agent-id>.mtm.sh
 # With no allowed host set, every proxied call is blocked.
 ```
 
-```py
-from alter_sdk import App, HttpMethod
-from alter_sdk.models import PendingApproval
+```ts
+import { PendingApproval } from "@alter-ai/alter-sdk";
 
-resp = await app.proxy_request(                      # app = App(api_key=os.environ["ALTER_API_KEY"])
-    HttpMethod.POST, f"{BASE}/internal/book/approved",
-    grant_id=GRANT_APPROVED,
-    json={"work_order_id": wo.id, "vendor_id": v.id, "slot_start": s, "slot_end": e, "amount_cad": amount},
-    reason=f"Book {v.name} for {wo.id}: call-out {fee} plus estimate up to {est_high}",
-    context={"work_order_id": wo.id},
-)
-if isinstance(resp, PendingApproval):
-    save_approval(wo, resp.approval_id, resp.approval_url)            # console banner, text, email
-    result = await app.await_approval(resp.approval_id, timeout=600)  # run in a background task
+const response = await alterAgent.proxyRequest({
+  method: "POST",
+  url: `${baseUrl}/internal/book/approved`,
+  grantId: approvedGrantId,
+  json: { work_order_id: order.id, vendor_id: vendor.id, slot_start: start, slot_end: end, amount_cad: amount },
+  reason: `Book ${vendor.name} for ${order.id} at a ceiling of $${amount} including the call-out fee`,
+  context: { work_order_id: order.id },
+});
+if (response instanceof PendingApproval) {
+  await saveApproval(order.id, response.approvalId, response.approvalUrl);
+  // Check getApprovalStatus in the background using the saved approval ID.
+}
 ```
 
 - `reason` is shown to the approver and stored in the audit log. Write it for a human.
 - After approval, alter sends the held request itself, at most once. Never re-send it.
-- Handle `ApprovalDeniedError` (tell the customer, offer the other vendor), `ApprovalExpiredError` (re-request), `ApprovalTimeoutError` (still pending: poll `get_approval_status`), `ApprovalExecutionFailedError` (approved but the booking call failed: escalate).
+- Map the TypeScript SDK approval outcomes to Relay states. On denial, tell the customer and offer the other vendor. On expiry, re-request per the timer rules. Keep polling with `getApprovalStatus()` while pending. Escalate execution failures. See the [Alter TypeScript SDK](https://docs.alterauth.com/reference/typescript-sdk/connect-and-grants/).
 - The approval window is 10 minutes by default.
 - The approver opens `approval_url` and must be signed in to alter with a verified email. For the demo, sign the "manager" account in on the second laptop beforehand.
 - If an OpenTelemetry span is active, the SDK forwards the trace context, which ties alter's audit entry to the traceroot trace.
@@ -371,30 +380,30 @@ if isinstance(resp, PendingApproval):
 
 ### traceroot: the flight recorder
 
-- **Setup.** `npx -y traceroot-cli@latest setup` signs in, creates the project key and lets Claude Code add the SDK. Then `pip install traceroot`, with `TRACEROOT_API_KEY` and `TRACEROOT_HOST_URL` in the environment. The SDK does not read `.env` files. Under uvicorn, call `traceroot.initialize(...)` in the FastAPI startup hook, not under `__main__`.
-- **Session = work order.** Wrap every request handler and background step in `using_attributes(session_id=work_order_id, tags=[trade, urgency, "demo"])`. The session view is then the whole job, across phone calls, webhooks and timers.
-- **Spans.** `@observe(name=..., type=..., metadata={...})` on each step: `intake.create_work_order`, `sourcing.fiber_search`, `calls.place` (one per vendor), `calls.event`, `quote.save`, `calls.post_call`, `decision.score`, `callback.place`, `decision.record`, `policy.request_booking`, `policy.await_approval`, `booking.execute`, `notify.send`, `timer.run`.
+- **Setup.** Configure the TraceRoot TypeScript SDK on the Wasp server and initialize tracing once at startup. Keep the project key in the server environment.
+- **Session = work order.** Tag spans from request handlers and background steps with the work order ID as the TraceRoot session ID, along with trade, urgency and demo tags. The session view is then the whole job, across phone calls, webhooks and timers.
+- **Spans.** Create a span per step using the TypeScript SDK or OpenTelemetry spans exported to TraceRoot. Use `intake.create_work_order`, `sourcing.fiber_search`, `calls.place` (one per vendor), `calls.event`, `quote.save`, `calls.post_call`, `decision.score`, `callback.place`, `decision.record`, `policy.request_booking`, `policy.await_approval`, `booking.execute`, `notify.send`, `timer.run`.
 - **Metadata.** vendor\_id, conversation\_id, attempt, hold seconds, amount, tier, outcome. No phone numbers and no transcripts.
 - **Console.** An "Open trace" button goes to the work order's session.
 - **P2.** An LLM-judge detector over vendor-call transcripts ("revealed the budget", "agreed to a booking") and a Slack alert for FAILED or ESCALATED jobs.
-- **Docs.** [Python SDK reference](https://traceroot.ai/docs/tracing/python-sdk.md) and their [coding-agent setup prompt](https://traceroot.ai/docs/getting-started/coding-agents.md).
+- **Docs.** [TraceRoot TypeScript SDK](https://github.com/traceroot-ai/traceroot-ts).
 
 ### Maritime: where the employee lives
 
-- **Create.** `npm install -g maritime-cli`, then `maritime login`, then `maritime create relay-core --repo https://github.com/<you>/relay --public --idle 3600`. The Dockerfile sits at the repo root and installs `ca-certificates`. Start with `CMD ["python", "start.py"]`, where `start.py` binds `0.0.0.0` on the `PORT` Maritime injects. Do not hardcode 8080 and do not use a shell-string CMD.
+- **Create.** `npm install -g maritime-cli`, then `maritime login`, then `maritime create relay-core --repo https://github.com/<you>/relay --public --idle 3600`. Run `wasp build` from `dashboard/`. Package the generated server using Wasp's Dockerfile and build output, and configure the Maritime repo-root Dockerfile to build and run that server on the injected `PORT`. Publish the generated React client to a static host with SPA route fallback. Configure the production client API URL at build time and the client origin on the server. See [Wasp self-hosting](https://wasp.sh/docs/deployment/methods/self-hosted).
 - **Public URL.** `https://<agent-id>.mtm.sh/`. Any request wakes a sleeping box in about a second with state intact. ElevenLabs tools and webhooks point here.
-- **State.** SQLite at `/data/relay.db`. Only `/data` survives redeploys.
+- **State.** Provision PostgreSQL reachable from Maritime, set `DATABASE_URL`, and apply the Wasp Prisma migrations at deploy time. Work orders and timers survive restarts in PostgreSQL.
 - **Secrets and logs.** `maritime env import relay-core ./prod.env --reload` and `maritime logs relay-core`.
 - **Agent contract.** `/health`, `/chat` and `/schedules` as in section 7. `maritime chat relay-core "status WO-1042"` then works from a terminal: you can message the employee.
-- **Why it fits.** A work order lives for hours or days: callbacks, approvals, next-morning follow-ups. The box sleeps between events and wakes on the next call, webhook or scheduled tick with memory and disk intact.
+- **Why it fits.** A work order can stay open for hours or days while it waits for callbacks, approvals or follow-up. The box sleeps between events and resumes work from PostgreSQL on the next call, webhook or scheduled tick.
 - **After a wake,** do not trust cached clock values. Compare timers against the current time.
 - **P2.** One box per customer, so their vendors, transcripts and secrets are isolated: `maritime create relay-<customer> ...` from a script. Hiring Relay for a new company becomes one command.
 - **Verify first.** A JSON POST to a custom path returns its response through the public URL. SSE streams through it (if not, the console polls every 2 s). Whether the repo may be private.
 
 ### assistant-ui: the text surface
 
-- `npx assistant-ui@latest init` in the console app, then `useChatRuntime` against an AI SDK route at `/api/chat`.
-- One thread per work order. The route's tools call relay-core: `get_work_order`, `get_events`, `get_transcript`. System rule: answer only from those records and give event times.
+- Add assistant-ui to the Wasp React console and connect `useChatRuntime` to the Wasp custom API at `/api/chat`. Stream AI SDK responses from the Node.js handler.
+- One thread per work order. The route's tools read from the Wasp server's data layer via `get_work_order`, `get_events` and `get_transcript`. System rule: answer only from those records and give event times.
 - Tool UIs render inside the thread: a quote comparison card, a call transcript card, and an approval card that links to `approval_url`.
 - It needs one model key for the chat route (any AI SDK provider).
 - Voice stays in ElevenLabs. assistant-ui has no ElevenLabs voice adapter built in, and we do not need one.
@@ -763,9 +772,9 @@ N10 text  Relay: did Bluejay fix the AC at 200 University? Reply YES, NO or NO-S
 | --- | --- | --- | --- |
 | Over the auto limit | Held in alter until the approver decides | Gated grant | P0 |
 | Over the hard cap | Never sent; escalated to a person | Tier rule, Bookings API ceiling | P0 |
-| Approval denied | Customer told; the other vendor offered | `ApprovalDeniedError` | P0 |
-| Approval expires | Re-request once; warn that the slot may go | `ApprovalExpiredError`, timer | P1 |
-| Approved, but the booking call failed | Not retried blindly; escalated with the error | `ApprovalExecutionFailedError` | P1 |
+| Approval denied | Customer told; the other vendor offered | Alter approval status | P0 |
+| Approval expires | Re-request once; warn that the slot may go | Alter approval status, timer | P1 |
+| Approved, but the booking call failed | Not retried blindly; escalated with the error | Alter execution result | P1 |
 | Approver is not the requester | Approval goes to the approver; the requester is informed | Approval fields | P2 |
 | Slot gone when the confirm call lands | Next opening captured; customer asked; runner-up offered | Confirm agent, `vendor_ack` | P1 |
 | Double booking | One Booking per work order, enforced by a unique key | Database | P0 |
@@ -781,7 +790,7 @@ N10 text  Relay: did Bluejay fix the AC at 200 University? Reply YES, NO or NO-S
 | Invoice above the approved ceiling | Needs a new approval. Relay never pays | Stated in the confirmation; payments are out of scope | Documented |
 | Duplicate tool call or webhook | Upserts, and a dedupe on `conversation_id` | Code | P0 |
 | Slow tool endpoint | Answers under 300 ms; slow work runs in the background; the tool call sound covers the gap | Code, agent setting | P0 |
-| Restart or box sleep mid-job | State is in SQLite under `/data`; timers re-arm; the `/schedules` tick wakes the box | Code, Maritime | P1 |
+| Restart or box sleep mid-job | State is in PostgreSQL. The Wasp server resumes pending timers, and the `/schedules` tick wakes the box | Code, Maritime | P1 |
 | Missing dynamic variable | One builder function per agent fills every variable with a default; a unit test checks each | Code | P0 |
 | Post-call webhook late or lost | After 20 s of silence, poll the conversation until it is done | Poller | P1 |
 | Rate limits | Backoff, cached vendor search, staggered dials | Code | P1 |
@@ -878,6 +887,7 @@ With these numbers Bluejay wins and comes to \$599, so the approval step fires e
 - alter: managed secrets, per-agent grants, human-in-the-loop approval, audit trail
 - traceroot: one session per work order, a span per step
 - Maritime: the agent box for relay-core, public URL, scheduled wake-ups, chat
+- Wasp: React console and custom Node.js APIs backed by Prisma and PostgreSQL
 - assistant-ui: the "Ask Relay" thread with tool UIs
 
 ## 15. Verify in the first 15 minutes
@@ -897,20 +907,21 @@ With these numbers Bluejay wins and comes to \$599, so the approval step fires e
 ## 16. Claude Code kickoff prompts
 
 ```txt
-WORKSTREAM C (relay-core)
-Read PRD.md. I own workstream C. Build core/ as FastAPI + SQLModel on SQLite at DB_PATH. Order of work:
-1. models.py from the section 7 data model. events.py with emit(): insert the Event, push it to SSE
-   subscribers, and open a span.
-2. The tool endpoints from section 7: pydantic validation, X-Relay-Secret check, {ok, say} responses, upserts.
+WORKSTREAM C (Wasp server)
+Read PRD.md. I own workstream C. Build the server in the shared Wasp app at dashboard/. Order of work:
+1. Define the section 7 data model in schema.prisma using PostgreSQL. Add events.ts with emit() to insert
+   the Event, push it to SSE subscribers, and open a span.
+2. Declare the tool endpoints as Wasp custom APIs. Use Zod validation, X-Relay-Secret checks, {ok, say}
+   responses, and Prisma upserts. Add the signed ElevenLabs webhook with raw-body middleware.
 3. /api/work_orders, /api/stream (SSE), /api/demo/reset, and /api/demo/simulate, which walks a fake job
    through every status one second apart.
-4. /health, /chat and /schedules per the Maritime contract. start.py binding 0.0.0.0 on $PORT. Dockerfile at
-   the repo root.
-5. orchestrator.py with the section 6 rules, the timers table and round closing. voice.py with place_call()
+4. Add Wasp custom APIs for /health, /chat and /schedules per the Maritime contract. Build the Wasp server
+   for Maritime using the deployment plan in section 8.
+5. Add orchestrator.ts with the section 6 rules, the timers table and round closing. Add voice.ts with placeCall()
    and the post-call webhook handler.
-6. scoring.py and the brief builders from section 10, with unit tests using the three demo quotes.
+6. Add scoring.ts and the brief builders from section 10, with unit tests using the three demo quotes.
 Workstream I owns sourcing.find(wo), policy.request_booking(wo, vendor, amount) and notify.send(wo, template,
-**ctx). Stub all three now so the loop runs end to end. Write scripts/smoke.sh with one curl per endpoint.
+ctx). Stub all three now so the loop runs end to end. Write scripts/smoke.sh with one curl per endpoint.
 No auth beyond the shared secret. No features that are not in the PRD.
 ```
 
@@ -922,33 +933,34 @@ analysis config from sections 8 and 9 into agents/ as files so they are versione
    system tools, dynamic variable defaults).
 2. For each tool, the values for the ElevenLabs tool form: name, description, URL on PUBLIC_BASE_URL, method,
    and every parameter with its type, description, and whether the model or a dynamic variable fills it.
-3. scripts/call_me.py, which places a test Vendor Caller call to my phone with every dynamic variable set.
+3. scripts/call_me.ts, which places a test Vendor Caller call to my phone with every dynamic variable set.
 4. The twelve scenario cards from section 13 as one printable page.
 ```
 
 ```txt
 WORKSTREAM I (integrations)
-Read PRD.md. I own workstream I. Implement behind three functions that are already stubbed in core/:
+Read PRD.md. I own workstream I. Implement the three server-side TypeScript functions stubbed in the Wasp app:
 - sourcing.find(wo): Fiber company search, one-hour cache, seed fallback, demo stand-ins.
 - policy.request_booking(wo, vendor, amount): the alter tiers from section 8, PendingApproval handled in a
-  background task, every Approval* exception mapped to a state in section 6, APPROVAL_BACKEND=local as a switch.
-- notify.send(wo, template, **ctx): Resend email, Twilio SMS, channel fallback, the templates in section 11.
-Then add traceroot per section 8: initialize in the FastAPI startup hook, using_attributes(session_id=
-work_order_id) around every handler and background step, @observe on each step name listed.
-Use the alter docs MCP and the Fiber skills for exact API shapes. Write one script per integration that proves
-it works on its own.
+  background task, approval outcomes mapped to section 6 states, APPROVAL_BACKEND=local as a switch.
+- notify.send(wo, template, ctx): Resend email, Twilio SMS, channel fallback, the templates in section 11.
+Then add traceroot per section 8: initialize the TypeScript SDK at Wasp server startup and tag spans from
+handlers and background steps with the work order ID. Use the step names listed in section 8.
+Use the alter TypeScript SDK docs and the Fiber skills for exact API shapes. Write one script per integration
+that proves it works on its own.
 ```
 
 ```txt
 WORKSTREAM D (console and demo)
-Read PRD.md. I own workstream D. Next.js app in console/: a page per work order at /wo/[id], and a home page
-that opens the newest. Data: GET /api/work_orders/{id} for the snapshot, /api/stream (SSE) to trigger a
-refetch, with a 2-second polling fallback.
+Read PRD.md. I own workstream D. Build React pages in the shared Wasp app at dashboard/: a Wasp route at
+/wo/:id for each work order, a home page that opens the newest, and a read-only tracking page (P1).
+Fetch GET /api/work_orders/{id} for the snapshot and use /api/stream (SSE) to trigger a refetch, with a
+2-second polling fallback.
 Layout. Left: work order card and live timeline. Centre: three vendor cards with status chip, hold timer,
 quote fields and QA chips. Right: comparison table, recommendation with its reason, approval banner with the
 approval link, booking confirmation, scheduled follow-up. Top: stopwatch from created_at to booked, demo-mode
-badge, reset button, "Open trace" link. Drawer: "Ask Relay" built with assistant-ui (useChatRuntime and an
-/api/chat route whose tools get_work_order, get_events and get_transcript call relay-core; answer only from
-those records).
+badge, reset button, "Open trace" link. Build the "Ask Relay" drawer with assistant-ui and useChatRuntime.
+Connect it to the /api/chat Wasp custom API. Its tools get_work_order, get_events and get_transcript query
+the data layer. Answer only from those records.
 Build against /api/demo/simulate first. Mask phone numbers. Use large type: judges read this from two metres.
 ```
