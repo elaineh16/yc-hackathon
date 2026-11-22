@@ -1,126 +1,120 @@
-# Relay — Team Execution Contract
+# Relay — Two-Person Execution Contract
 
-**Source of truth:** `PRD.md` first, then `DEMO.md`. This document only assigns owners and coordinates implementation. If anything conflicts with the PRD, follow the PRD.
+**Product source of truth:** `PRD.md`. **Rehearsal script:** `DEMO.md`. If this document conflicts with either, follow the current files on `main`.
 
-## 1. The current product (read this before coding)
+## 1. Locked product and architecture
 
-Build the exact single-washer demo in the current PRD:
+Build the exact single-washer demo:
 
-- A student opens the student page on a phone and starts a live, full-duplex ElevenLabs browser voice session.
-- Relay asks at most three clarification questions and reads back MKV, the main laundry room, washer 2, dry floor, and reported `OE`.
-- One server-side intake tool saves the report and returns success only after the work order is persisted.
-- Wasp starts the staff request and seeded contractor progression.
-- Staff and manager actions happen in the Wasp operator dashboard.
-- Contractor outcomes and the final appointment are **simulated and visibly labelled**. Do not call real contractors.
-- Manager approval is required for the $329 pre-tax estimate; the manager approves a $400 CAD all-in cap, conditional on diagnosis.
-- The appointment appears only after the manager approves and the seeded confirmation is recorded.
-- The student page polls and shows staff and repair updates. Staff retrieval and repair remain separate status lanes.
+1. Student opens the mobile page and starts a live, full-duplex ElevenLabs browser voice session.
+2. Relay asks at most three clarification questions and reads back MKV, main laundry room, washer 2, dry floor and reported `OE`.
+3. One authenticated server tool persists the work order before Relay says it was saved.
+4. Wasp starts the staff request and seeded contractor progression.
+5. Staff and manager actions happen in the Wasp operator dashboard.
+6. Bluejay, QuickFix, Metro and the appointment are seeded/simulated and visibly labelled.
+7. Manager approval is required before simulated confirmation. Staff retrieval and repair status remain separate.
 
-Do not expand the product into a generic operations agent.
+**One application only:** Wasp React client + Wasp Node server + Prisma/PostgreSQL in `dashboard/`. Maritime hosts the Wasp Node server. The browser page uses the ElevenLabs React SDK; the ElevenLabs API key remains server-side.
 
-## 2. Architecture
+**Twilio is optional only.** If an existing Twilio assistant/number is already working, preserve it as an optional fallback/bonus. Do not make it a dependency, do not replace the required browser-based ElevenLabs flow, and do not spend core build time on it.
 
-Build **one Wasp full-stack application** in `dashboard/`:
+Do not create a separate FastAPI, Express or Next.js app. Do not add live contractor calls, live bookings, or mandatory Fiber/Alter/TraceRoot integrations. Contractor responses and confirmation remain simulated.
 
-- Wasp: React student page, React operator dashboard, generated Node.js server, Wasp APIs/actions.
-- Prisma + PostgreSQL: durable demo session, work order, staff request, seeded contractor outcomes, manager decision, appointment and timeline.
-- Maritime: hosts the Wasp Node.js server and exposes the public health and intake endpoints.
-- ElevenLabs React SDK: live browser voice session. The ElevenLabs API key stays server-side; the server issues the browser connection credential.
-- Contractor calls are not real provider calls in this PRD. Contractor outcomes are deterministic seeded demo events.
+## 2. Two owners, two branches
 
-**Do not create** FastAPI, a separate Express service, a separate Next.js app, Twilio phone calling, live contractor dialling, or required Fiber/Alter/TraceRoot integrations. Those are not part of the current PRD's required demo. Do not spend the four-hour build wiring them in. Optional sponsor integrations require an explicit team decision and must not delay the required flow.
+| Owner | Branch | Owns | Deliverable |
+|---|---|---|---|
+| **Backend owner — you** | `feat/wasp-core` | Wasp scaffold/config, Prisma schema/migrations, database, custom intake API, server queries/actions, workflow/state transitions, seeded results, approval checks, reset, health endpoint and Maritime deployment | Working backend and durable demo workflow |
+| **UI/voice owner — teammate** | `feat/dashboard` | Student mobile page, ElevenLabs React SDK browser session, agent prompt/tool setup in coordination with backend owner, staff/manager dashboard, timeline, polling, loading/error/retry states and responsive styling | Complete student + operator experience inside the same Wasp app |
 
-Use PostgreSQL and `DATABASE_URL`; do not use the old SQLite `DB_PATH`.
+The UI/voice owner can start immediately by sketching the page/component structure and typed mock view-models. As soon as the backend owner pushes the minimal Wasp scaffold, the UI/voice owner updates their branch from the scaffold and implements inside it. Do not create a second scaffold.
 
-## 3. Four owners and file boundaries
+### File boundaries
 
-| Owner | Owns | Primary deliverable |
-|---|---|---|
-| C — Core/backend | Wasp scaffold, Prisma schema, server APIs/actions, workflow state, server-issued ElevenLabs connection credential, security, Maritime server deployment | Working Wasp app and durable backend |
-| D — Dashboard | React student page and React operator dashboard inside the same Wasp app | Mobile student voice/status page and manager/staff console |
-| V — Voice | ElevenLabs agent, React SDK browser session, intake prompt, browser connection and server-tool configuration | Live student conversation that saves a work order |
-| I — QA/demo workflow | Seeded contractor fixtures/progression, acceptance tests, idempotency/replay tests, safety tests, reset/rehearsal checklist | Reproducible demo with verified state transitions |
+- Backend owner alone edits `main.wasp.ts`, `schema.prisma`, migrations and server workflow files.
+- UI/voice owner edits client pages, components and styles.
+- Agree on shared TypeScript request/response types before connecting the UI. Do not independently rename API fields.
+- Neither person commits real `.env` files, API keys or tool secrets.
+- Work on separate branches; no direct pushes to `main`.
 
-### File ownership
+## 3. Backend contract to publish for the UI/voice owner
 
-- C alone edits `main.wasp.ts`, `schema.prisma`, database migrations and core workflow/server state transitions.
-- D owns client pages, React components, styling and dashboard interactions. D must not create a separate frontend app.
-- V owns ElevenLabs console configuration, agent prompt and client-side voice integration. V uses the exact endpoint and payload C confirms; V does not invent routes.
-- I owns test plans, test fixtures and tests in the locations C establishes. I does not change core workflow behavior without coordinating with C.
-- No one commits `.env`, API keys, signing secrets, phone numbers or other credentials.
+The PRD requires a Wasp custom POST intake API but does not prescribe the exact route or JSON field names. Backend owner must publish these before the ElevenLabs tool is connected:
 
-## 4. API handoff
+- Exact public HTTPS URL and method.
+- Required auth header and server-side secret validation.
+- Exact request JSON, including demo session ID, residence, room, washer, symptom, water/floor status and reported error code.
+- Exact success and error JSON.
+- Idempotency key and duplicate-report behavior.
+- How the returned workOrderId links to the student's session.
+- Confirmation that success is returned only after database persistence.
 
-The PRD requires one Wasp custom POST intake API used by an ElevenLabs server tool. It does not prescribe an exact URL or JSON field names.
+Recommended route if no existing route is implemented: `POST /api/relay/intake`. This is a recommendation, not a live endpoint yet. Also expose `GET /health`.
 
-C must publish a short, definitive API contract before V wires the tool. It must include:
-1. Exact public HTTPS URL and HTTP method.
-2. Required authentication header and how the secret is checked.
-3. Exact request JSON schema, including demo session ID and washer/location/symptom details.
-4. Exact success and error response JSON.
-5. Idempotency behavior for repeated tool calls.
-6. How the work order ID is associated with the student's demo session.
-7. Confirmation that the tool returns success only after the database write succeeds.
+Student UI should call Wasp server queries/actions for the active work order and timeline. Do not expose manager approval or simulated confirmation as ElevenLabs voice tools.
 
-Recommended route if C has no existing reason to choose another: `POST /api/relay/intake`. This is a recommendation, not a route already implemented.
+## 4. Minimal data and workflow
 
-The server must also expose `GET /health`. The student page must obtain its ElevenLabs browser connection credential from the Wasp server; never expose the ElevenLabs API key in browser code.
+Use Prisma/PostgreSQL for:
+- DemoSession
+- WorkOrder
+- StaffRequest
+- ContractorResult (seeded and labelled simulated)
+- ManagerDecision
+- Appointment (simulated)
+- TimelineEvent
 
-Dashboard interactions should be Wasp server actions/queries:
-- Load active work order and timeline.
-- Staff accepts with ETA.
-- Staff marks clothes retrieved or unavailable.
-- Manager approves or denies the specified booking cap.
-- Manager records the seeded confirmation only after approval.
-- Reset the demo.
+Keep two independent state lanes:
 
-The voice agent must not have a tool that approves spending or confirms a booking.
+**Staff lane:** REQUESTED → ACCEPTED (ETA) → RETRIEVED, or UNAVAILABLE.
 
-## 5. Workflow invariants
+**Repair lane:** OPTIONS_PENDING → RECOMMENDED → PENDING_APPROVAL → APPROVED / DENIED → CONFIRMATION_PENDING → CONFIRMED.
 
-1. The work order is persisted before the intake agent tells the student it was saved.
-2. Repeated intake for the same open washer incident updates the existing order rather than creating duplicates.
-3. Ask at most three clarification questions; read back the key details before saving.
-4. Treat `OE` as a reported drainage symptom, not proof of a failed drain pump.
-5. A reported safety hazard stops normal flow and directs the student to designated residence staff.
-6. Staff retrieval and repair have separate statuses. Clothes can be retrieved while repair remains pending.
-7. Staff assistance and the seeded contractor progression start independently after intake is saved.
-8. Seeded contractor outcomes must be visibly labelled simulated: Bluejay $329 CAD pre-tax next day, conditional on diagnosis; QuickFix $99 CAD same-day diagnostic, repair extra; Metro voicemail.
-9. Explain the recommendation using availability, known price and scope. Do not treat unknown values as known.
-10. $329 pre-tax is above the $250 auto-approval threshold. Manager approval is required for a $400 CAD all-in cap, conditional on diagnosis.
-11. Student preference is not manager approval.
-12. Simulated confirmation is blocked until manager approval. Appointment appears only after the confirmation action is recorded.
-13. Denial leaves the appointment unconfirmed.
-14. Reset returns all state to a repeatable initial demo.
-15. Repeated actions and polling must not create duplicate events or notifications.
+Seeded contractor data:
+- Bluejay: next day, $329 CAD pre-tax repair estimate, conditional on diagnosis.
+- QuickFix: same day, $99 CAD diagnostic only, repair extra.
+- Metro: voicemail; price and availability unknown.
 
-## 6. Work in parallel immediately
+The $329 pre-tax estimate exceeds the $250 auto-approval threshold. Manager approves a $400 CAD all-in cap including taxes and fees, conditional on diagnosis. Student preference is never manager approval. Simulated confirmation is accepted only after manager approval. Denial leaves appointment unconfirmed.
 
-- **C:** Initialize the Wasp app in `dashboard/`, run it locally, define the Prisma models and publish the intake API contract. Push the scaffold as the first PR.
-- **D:** Design and implement the student and operator React screens inside the Wasp app. Until C's schema/query is ready, use typed mock data in client-only components and clearly isolate it for replacement.
-- **V:** Build the ElevenLabs intake agent prompt and configure the browser-session plan. Verify account access and agent ID. Do not configure a guessed webhook URL; wait for C's confirmed endpoint contract.
-- **I:** Turn section 5 and the PRD's “Ready to show” list into executable acceptance tests and seeded fixtures. Start with a test matrix and typed fixture proposal; integrate after C publishes model names.
+## 5. Edge cases to test
 
-## 7. Git / PR protocol
+- Microphone permission denied; voice connection fails; retry works without false connected state.
+- Missing/unclear intake details; maximum three clarifying questions; correction before save.
+- Intake API/database failure; no false “saved” response.
+- Duplicate intake for same open washer; one work order only.
+- Wrong residence/room/washer corrected before persistence.
+- `OE` treated as reported symptom, not confirmed pump diagnosis.
+- Leak/electrical/smoke/unsafe condition stops normal flow and escalates to residence staff.
+- Staff unavailable updates student and routes retrieval to manager.
+- Clothes retrieved while repair remains pending.
+- QuickFix diagnostic-only scope is not compared as a complete repair quote.
+- Metro voicemail stays unknown for price/availability.
+- Manager denial leaves appointment unconfirmed.
+- Confirmation before approval is rejected server-side.
+- Duplicate approve/confirm calls do not create duplicate appointment/timeline events.
+- Session isolation: one student cannot see another session's work order.
+- Polling does not write duplicate events.
+- Reset returns the demo to a clean initial state and invalidates stale session state.
+- All seeded contractor outcomes and appointment are visibly labelled simulated.
+- API keys/tool secrets stay server-side and out of Git.
 
-Branches:
-- C: `feat/wasp-core`
-- D: `feat/dashboard`
-- V: `feat/voice`
-- I: `feat/integrations` (this owner is QA/demo workflow under the current PRD; branch name is retained to avoid renaming confusion).
+## 6. One-hour build order
 
-Everyone works on their own branch, never directly on `main`.
+1. **First 10 minutes — scaffold and agree contract.** Backend owner creates the minimal Wasp app and pushes it. UI/voice owner prepares the student and dashboard component shells against typed mock data.
+2. **Minutes 10–25 — vertical slice.** Backend owner creates the core schema and intake API. UI/voice owner builds the work-order dashboard and student status view using the agreed response shape.
+3. **Minutes 25–40 — close the workflow.** Add staff accept/retrieve/unavailable, seeded contractor results, manager approve/deny, and server-side confirmation guard. UI/voice owner wires polling and dashboard actions.
+4. **Minutes 40–50 — live voice.** Connect the ElevenLabs browser session and intake tool to the confirmed endpoint. Do not put the API key in the browser. Twilio remains optional.
+5. **Minutes 50–60 — test and rehearse.** Run the critical tests in section 5 and the demo script in `DEMO.md`. Fix broken state transitions before visual polish.
 
-Each owner:
-1. `git fetch origin`
-2. Switch to their assigned branch.
-3. Work only in owned files.
-4. Run relevant checks.
-5. Commit and push.
-6. Open a PR to `main`.
-7. Post the PR link, files changed, tests and blockers in team Discord.
+If time is lost, preserve this priority: (1) durable intake, (2) dashboard shows the same work order, (3) staff state updates, (4) manager approval guard, (5) simulated contractor/appointment states, (6) live voice polish. Never claim an incomplete or simulated provider action is live.
 
-C is integration coordinator and reviews shared API/schema changes. Merge C's Wasp scaffold first; D, V and I then update their branches from `main` and open integration PRs. No one silently changes API paths, payloads or database field names.
+## 7. Git workflow
+
+- Backend owner: `feat/wasp-core`
+- UI/voice owner: `feat/dashboard`
+
+Both start with `git fetch origin`, switch to their branch, commit small changes and open a PR to `main`. Once the backend scaffold is merged, the UI/voice owner updates their branch from `main`. Coordinate any API/schema change before merging.
 
 Discord update format:
 
@@ -131,24 +125,5 @@ COMMIT / PR:
 FILES CHANGED:
 TESTS RUN + RESULT:
 BLOCKER:
-API / SCHEMA CHANGE NEEDED: YES / NO
+API / SCHEMA CHANGE: YES / NO
 ```
-
-## 8. Demo acceptance checklist
-
-- [ ] Student page works on phone over HTTPS.
-- [ ] One tap starts the ElevenLabs browser voice session; End call works.
-- [ ] Relay asks no more than three questions and reads back MKV / main laundry room / washer 2 / floor dry / OE.
-- [ ] Successful intake creates one persisted work order and staff request.
-- [ ] Repeat intake updates the same open incident.
-- [ ] Staff accepts with 15-minute ETA; student page updates; staff can mark clothes retrieved.
-- [ ] Bluejay, QuickFix and Metro results appear and are labelled simulated.
-- [ ] Recommendation explains price, availability and scope accurately.
-- [ ] Manager sees $329 pre-tax and approves a $400 all-in cap; denial path is also tested.
-- [ ] Simulated confirmation is blocked before approval and appointment appears after confirmation.
-- [ ] Safety hazard stops normal flow.
-- [ ] Reset makes the demo repeatable.
-
-## 9. Status reporting
-
-C maintains one short status update in Discord or the PR. Do not have all four people edit a shared status file. Every milestone update must state what is implemented versus mocked/simulated. The team must never describe simulated contractor calls or appointments as real.
