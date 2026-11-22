@@ -40,7 +40,18 @@ export interface IntakeInput {
   safetyHazard: boolean;
   hazardDetails: string | null;
   conversationId: string | null;
+  source?: "voice" | "test"; // "test" = the labelled no-voice fallback button
 }
+/** DEMO.md's report, used by the no-voice fallback (submitTestReport). */
+export const DEMO_REPORT = {
+  residence: "MKV",
+  room: "main laundry room",
+  washer: "2",
+  symptom: "Washer won't drain; clothes stuck inside",
+  floor_status: "dry",
+  error_code: "OE",
+  safety_hazard: false,
+};
 export type Parsed<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
 const str = (v: unknown, max: number): string | null => {

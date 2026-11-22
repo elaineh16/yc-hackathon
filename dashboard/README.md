@@ -22,11 +22,11 @@ Checks (server running):
 
 ```bash
 npm test          # 9 unit tests for the rules in src/server/relay/domain.ts
-npm run smoke     # 53 end-to-end HTTP checks. WARNING: resets the demo database
+npm run smoke     # 56 end-to-end HTTP checks. WARNING: resets the demo database
 ```
 
-Rehearse without voice: there is no test-report button by design. Use the intake curl below with the
-student page's session id (`localStorage["relay.sessionId"]`).
+Rehearse without voice: set `ALLOW_TEST_REPORT=true` and open `/?test=1`. The student page then shows **Send test report
+(no voice)**, which saves DEMO.md's report through the same intake path, labelled as a test report on the timeline.
 
 ## What the server enforces
 

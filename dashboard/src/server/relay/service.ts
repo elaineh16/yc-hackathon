@@ -114,7 +114,7 @@ async function persistIntake(v: D.IntakeInput): Promise<IntakeResult> {
             lane: "INTAKE",
             type: "intake.saved",
             actor: "RELAY",
-            message: `Work order #${wo.number} saved from voice intake: ${D.locationLabel(wo)}. ${v.symptom}. Floor ${v.floorStatus.toLowerCase()}${code}.`,
+            message: `Work order #${wo.number} saved from ${v.source === "test" ? "a typed test report (no voice)" : "voice intake"}: ${D.locationLabel(wo)}. ${v.symptom}. Floor ${v.floorStatus.toLowerCase()}${code}.`,
             studentMessage: "Your report is saved.",
           },
           {

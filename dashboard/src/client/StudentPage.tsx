@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createDemoSession, getStudentStatus, useQuery } from "wasp/client/operations";
+import { createDemoSession, getStudentStatus, submitTestReport, useQuery } from "wasp/client/operations";
 import { VoicePanel } from "./VoicePanel";
 import "./relay.css";
 
@@ -53,6 +53,9 @@ export function StudentPage() {
   }, [status.data?.sessionValid]);
 
   const wo = status.data?.workOrder ?? null;
+  // No-voice fallback for rehearsal or if voice fails on stage: open /?test=1 (server must allow ALLOW_TEST_REPORT).
+  const showTestReport = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("test");
+  const [testError, setTestError] = useState<string | null>(null);
   return (
     <main className="wrap narrow">
       <h1>Relay</h1>
@@ -65,6 +68,24 @@ export function StudentPage() {
         </div>
       )}
       {sessionId && <VoicePanel sessionId={sessionId} />}
+      {sessionId && showTestReport && !wo && (
+        <section className="card">
+          <p className="muted">No voice? Send DEMO.md's washer report as a labelled test report.</p>
+          <button
+            onClick={async () => {
+              setTestError(null);
+              try {
+                await submitTestReport({ sessionId });
+              } catch (e) {
+                setTestError(e instanceof Error ? e.message : "Could not send the test report.");
+              }
+            }}
+          >
+            Send test report (no voice)
+          </button>
+          {testError && <p className="err">{testError}</p>}
+        </section>
+      )}
 
       <section className="card" aria-live="polite">
         <h2>Latest update</h2>

@@ -2,6 +2,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { HttpError } from "wasp/server";
 import type { OperatorDashboard, StudentStatus } from "../shared/relayTypes.js";
+import { DEMO_REPORT, parseIntake } from "./relay/domain.js";
 import * as svc from "./relay/service.js";
 import { operatorDashboard, studentStatus } from "./relay/views.js";
 import { traced } from "./tracing.js";
@@ -27,6 +28,20 @@ export const createDemoSession = async (_args: void, _ctx: unknown) => svc.creat
 export const getStudentStatus = async (args: { sessionId: string }, _ctx: unknown): Promise<StudentStatus> => {
   if (typeof args?.sessionId !== "string" || !args.sessionId) return { sessionValid: false, workOrder: null };
   return studentStatus(args.sessionId, advance);
+};
+
+/** No-voice fallback: records DEMO.md's report through the same intake path. Off unless ALLOW_TEST_REPORT=true. */
+export const submitTestReport = async (args: { sessionId: string }, _ctx: unknown) => {
+  if (process.env.ALLOW_TEST_REPORT !== "true") throw new HttpError(403, "Test reports are turned off on this server.");
+  const parsed = parseIntake({ ...DEMO_REPORT, demo_session_id: args?.sessionId });
+  if (!parsed.ok) throw new HttpError(400, "A session is required.");
+  try {
+    const r = await traced("relay.intake.tool", { demoSessionId: args.sessionId, source: "test" }, () => svc.recordIntake({ ...parsed.value, source: "test" }));
+    return { workOrderId: r.workOrderId, created: r.created };
+  } catch (e) {
+    if (e instanceof svc.IntakeError) throw new HttpError(e.status, e.message);
+    throw e;
+  }
 };
 
 // ---------- operator dashboard ----------

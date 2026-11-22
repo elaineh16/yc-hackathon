@@ -31,6 +31,10 @@ action startVoiceSession {
   fn: import { startVoiceSession } from "@src/server/voice",
   entities: [DemoSession]
 }
+action submitTestReport {
+  fn: import { submitTestReport } from "@src/server/operations",
+  entities: [DemoSession, WorkOrder, StaffRequest, TimelineEvent]
+}
 query getStudentStatus {
   fn: import { getStudentStatus } from "@src/server/operations",
   entities: [DemoSession, WorkOrder, StaffRequest, ContractorResult, ManagerDecision, Appointment, TimelineEvent]

@@ -177,6 +177,19 @@ console.log("\n10. Staff unavailable -> manager takes over retrieval");
   check((await op("staffMarkRetrieved", { workOrderId: id })).status === 200, "manager-arranged retrieval recorded");
 }
 
+console.log("\n10b. No-voice fallback (only if the server sets ALLOW_TEST_REPORT=true)");
+{
+  await op("resetDemo");
+  const sid = await newSession();
+  const t = await op("submitTestReport", { sessionId: sid });
+  if (t.status === 403) check(true, "test report refused: ALLOW_TEST_REPORT is off");
+  else {
+    const dd = await dash();
+    check(t.status === 200 && (await student(sid)).workOrder?.id === t.data.workOrderId, "test report saved and shown on that student page");
+    check(dd.workOrder.timeline.some((e: any) => /typed test report \(no voice\)/.test(e.message)), "timeline labels it a test report, not voice");
+  }
+}
+
 console.log("\n11. Safety hazard stops the normal flow");
 {
   await op("resetDemo");
