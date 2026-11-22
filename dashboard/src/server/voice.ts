@@ -2,13 +2,16 @@
 import { HttpError } from "wasp/server";
 import type { VoiceSessionCredential } from "../shared/relayTypes.js";
 import { requireSession } from "./relay/service.js";
+import { traced } from "./tracing.js";
 
 const API = "https://api.elevenlabs.io/v1/convai/conversation";
 
-export const startVoiceSession = async (
-  args: { sessionId: string; connectionType?: "webrtc" | "websocket" },
-  _ctx: unknown,
-): Promise<VoiceSessionCredential> => {
+export const startVoiceSession = (args: { sessionId: string; connectionType?: "webrtc" | "websocket" }, _ctx: unknown) =>
+  traced("relay.voice_session.create", { demoSessionId: args?.sessionId, connectionType: args?.connectionType ?? "webrtc" }, () => issueCredential(args), (c) => ({
+    credentialIssued: Boolean(c.conversationToken || c.signedUrl),
+  }));
+
+async function issueCredential(args: { sessionId: string; connectionType?: "webrtc" | "websocket" }): Promise<VoiceSessionCredential> {
   const key = process.env.ELEVENLABS_API_KEY;
   const agentId = process.env.EL_AGENT_INTAKE_ID || process.env.ELEVENLABS_AGENT_ID;
   if (!key || !agentId) throw new HttpError(503, "Voice is not configured on the server yet.");
@@ -35,4 +38,4 @@ export const startVoiceSession = async (
     agentId,
     dynamicVariables: { demo_session_id: args.sessionId },
   };
-};
+}

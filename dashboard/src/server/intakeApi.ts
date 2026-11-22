@@ -8,6 +8,7 @@ import type { Request, Response } from "express";
 import { prisma } from "wasp/server";
 import { agentMessage, parseIntake } from "./relay/domain.js";
 import { IntakeError, recordIntake } from "./relay/service.js";
+import { mark, traced } from "./tracing.js";
 
 const NOT_SAVED = "The report was NOT saved. Do not tell the student it was saved.";
 
@@ -19,7 +20,16 @@ function secretOk(header: unknown): boolean {
   return timingSafeEqual(h(header), h(want));
 }
 
-export const relayIntake = async (req: Request, res: Response, _ctx: unknown) => {
+export const relayIntake = (req: Request, res: Response, ctx: unknown) => {
+  const sid = typeof req.body?.demo_session_id === "string" ? req.body.demo_session_id.slice(0, 64) : undefined;
+  return traced("relay.intake.tool", { demoSessionId: sid }, async () => {
+    await handleIntake(req, res, ctx);
+    // HTTP outcome as a safe reason code; the business result is in the child spans.
+    if (res.statusCode >= 400) mark("relay.error", { demoSessionId: sid, stage: "intake", status: res.statusCode });
+  }, () => ({ status: res.statusCode }));
+};
+
+async function handleIntake(req: Request, res: Response, _ctx: unknown) {
   if (!process.env.RELAY_TOOL_SECRET) {
     return res.status(503).json({ ok: false, error: "not_configured", message: `${NOT_SAVED} The server is not configured.` });
   }
@@ -55,7 +65,7 @@ export const relayIntake = async (req: Request, res: Response, _ctx: unknown) =>
       message: `${NOT_SAVED} Apologize, and tell the student to report it at the residence front desk.`,
     });
   }
-};
+}
 
 export const health = async (_req: Request, res: Response, _ctx: unknown) => {
   try {

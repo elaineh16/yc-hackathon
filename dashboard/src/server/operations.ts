@@ -4,6 +4,7 @@ import { HttpError } from "wasp/server";
 import type { OperatorDashboard, StudentStatus } from "../shared/relayTypes.js";
 import * as svc from "./relay/service.js";
 import { operatorDashboard, studentStatus } from "./relay/views.js";
+import { traced } from "./tracing.js";
 
 const advance = (id: string) => svc.advanceSimulation(id);
 
@@ -31,31 +32,45 @@ export const getStudentStatus = async (args: { sessionId: string }, _ctx: unknow
 // ---------- operator dashboard ----------
 export const getOperatorDashboard = async (_args: void, _ctx: unknown): Promise<OperatorDashboard> => operatorDashboard(advance);
 
+const idem = (r: { idempotent: boolean }) => ({ idempotent: r.idempotent });
+
 export const staffAccept = async (args: OpArgs & { etaMinutes?: number }, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.staffAccept(workOrderId(args), args.etaMinutes ?? 15);
+  const id = workOrderId(args);
+  return traced("relay.staff_status.update", { workOrderId: id, to: "ACCEPTED", etaMinutes: args.etaMinutes ?? 15 }, () => svc.staffAccept(id, args.etaMinutes ?? 15), idem);
 };
 export const staffMarkRetrieved = async (args: OpArgs, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.staffRetrieved(workOrderId(args));
+  const id = workOrderId(args);
+  return traced("relay.staff_status.update", { workOrderId: id, to: "RETRIEVED" }, () => svc.staffRetrieved(id), idem);
 };
 export const staffMarkUnavailable = async (args: OpArgs & { reason?: string }, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.staffUnavailable(workOrderId(args), args.reason);
+  const id = workOrderId(args);
+  return traced("relay.staff_status.update", { workOrderId: id, to: "UNAVAILABLE" }, () => svc.staffUnavailable(id, args.reason), idem);
 };
 export const approveRepair = async (args: OpArgs & { capCents?: number; approver?: string; note?: string }, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.approveRepair(workOrderId(args), args.capCents ?? 40_000, args.approver?.trim().slice(0, 60) || "Manager", args.note);
+  const id = workOrderId(args);
+  const cap = args.capCents ?? 40_000;
+  return traced(
+    "relay.manager_decision",
+    { workOrderId: id, decision: "APPROVED", capCents: cap, currency: "CAD", simulated: false },
+    () => svc.approveRepair(id, cap, args.approver?.trim().slice(0, 60) || "Manager", args.note),
+    idem,
+  );
 };
 export const denyRepair = async (args: OpArgs & { approver?: string; note?: string }, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.denyRepair(workOrderId(args), args.approver?.trim().slice(0, 60) || "Manager", args.note);
+  const id = workOrderId(args);
+  return traced("relay.manager_decision", { workOrderId: id, decision: "DENIED" }, () => svc.denyRepair(id, args.approver?.trim().slice(0, 60) || "Manager", args.note), idem);
 };
 export const simulateConfirmation = async (args: OpArgs, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.simulateConfirmation(workOrderId(args));
+  const id = workOrderId(args);
+  return traced("relay.appointment.simulate_confirm", { workOrderId: id, simulated: true }, () => svc.simulateConfirmation(id), idem);
 };
 export const resetDemo = async (args: { operatorPin?: string } | undefined, _ctx: unknown) => {
   requireOperator(args?.operatorPin);
-  return svc.resetDemo();
+  return traced("relay.demo.reset", {}, () => svc.resetDemo(), (r) => ({ sessionsCleared: r.sessionsCleared }));
 };

@@ -2,6 +2,7 @@
 // clicks, agent retries and concurrent polls can never skip a step or write a second result.
 import { HttpError, prisma } from "wasp/server";
 import type { Prisma } from "@prisma/client";
+import { mark, traced } from "../tracing.js";
 import * as D from "./domain.js";
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -16,8 +17,13 @@ interface EventIn {
   dedupe?: string; // defaults to the type: one event of each type per work order
 }
 async function addEvents(db: Db, workOrderId: string, events: EventIn[]) {
+  const forStudent = events.filter((e) => e.studentMessage).map((e) => e.type);
+  if (forStudent.length) mark("relay.student_update.publish", { workOrderId, types: forStudent.join(",") });
+  // Events written together share a transaction; 1 ms apart keeps their timeline order stable.
+  const base = Date.now();
   await db.timelineEvent.createMany({
-    data: events.map((e) => ({
+    data: events.map((e, i) => ({
+      createdAt: new Date(base + i),
       workOrderId,
       lane: e.lane,
       type: e.type,
@@ -58,7 +64,16 @@ export interface IntakeResult {
 }
 
 /** Persists the report. Returns only after the transaction commits, so the agent never hears "saved" early. */
-export async function recordIntake(v: D.IntakeInput): Promise<IntakeResult> {
+export function recordIntake(v: D.IntakeInput): Promise<IntakeResult> {
+  const hazard = D.isHazard(v);
+  mark("relay.safety.classify", { demoSessionId: v.sessionId, hazard, floorStatus: v.floorStatus, outcome: hazard ? "hazard_escalated" : "normal_flow" });
+  return traced("relay.work_order.persist", { demoSessionId: v.sessionId }, () => persistIntake(v), (r) => {
+    if (r.created) mark("relay.staff_request.create", { demoSessionId: v.sessionId, workOrderId: r.workOrderId, priority: r.hazard ? "SAFETY" : "NORMAL" });
+    return { workOrderId: r.workOrderId, created: r.created, duplicate: r.duplicate };
+  });
+}
+
+async function persistIntake(v: D.IntakeInput): Promise<IntakeResult> {
   if (!(await requireSession(v.sessionId))) {
     throw new IntakeError(404, "unknown_session", "demo_session_id is not an active session (the demo may have been reset).");
   }
@@ -138,11 +153,15 @@ export async function recordIntake(v: D.IntakeInput): Promise<IntakeResult> {
 
 async function updateExisting(
   tx: Prisma.TransactionClient,
-  existing: { id: string; number: number; intakeFingerprint: string; safetyHazard: boolean; intakeCount: number; repairStatus: string },
+  existing: { id: string; number: number; sessionId: string; intakeFingerprint: string; safetyHazard: boolean; intakeCount: number; repairStatus: string },
   v: D.IntakeInput,
   fp: string,
   hazard: boolean,
 ): Promise<IntakeResult> {
+  // The phone that reported most recently follows the order (e.g. the student reopened the page in a new session).
+  if (existing.sessionId !== v.sessionId) {
+    await tx.workOrder.update({ where: { id: existing.id }, data: { sessionId: v.sessionId } });
+  }
   if (existing.intakeFingerprint === fp) {
     return { workOrderId: existing.id, number: existing.number, created: false, duplicate: true, hazard: existing.safetyHazard };
   }
@@ -211,6 +230,7 @@ export async function advanceSimulation(workOrderId: string, now = Date.now()) {
   const step = D.simStepMs();
   const due = D.SEEDED_RESULTS.filter((r) => elapsed >= r.revealStep * step);
   if (due.length) {
+    mark("relay.contractor_results.seed", { workOrderId, simulated: true, contractors: due.map((r) => r.contractorKey).join(",") });
     await prisma.contractorResult.createMany({
       data: due.map((r) => ({
         workOrderId,
@@ -255,6 +275,14 @@ async function recommendAndRequestApproval(workOrderId: string) {
     if (moved.count === 0) return; // another caller already did this step
     const chosen = results.find((r) => r.contractorKey === rec.contractorKey)!;
     const approval = D.needsApproval(rec.priceCents, limits.autoApproveLimitCents);
+    mark("relay.recommendation.compute", {
+      workOrderId,
+      recommended: rec.contractorKey,
+      estimateCents: rec.priceCents,
+      currency: "CAD",
+      approvalRequired: approval,
+      simulated: true,
+    });
     await tx.managerDecision.create({
       data: {
         workOrderId,
@@ -421,6 +449,8 @@ export async function simulateConfirmation(workOrderId: string) {
     const wo = await tx.workOrder.findUnique({ where: { id: workOrderId }, include: { decision: true, appointment: true } });
     if (!wo) throw new HttpError(404, "Work order not found");
     if (wo.appointment) return { ok: true, idempotent: true };
+    const allowed = wo.decision?.status === "APPROVED";
+    mark("relay.confirmation.guard", { workOrderId, allowed, reason: allowed ? "approved" : "approval_required" });
     if (wo.decision?.status !== "APPROVED") throw new HttpError(409, "Manager approval is required before confirmation.");
     const moved = await tx.workOrder.updateMany({
       where: { id: workOrderId, repairStatus: D.REPAIR.CONFIRMATION_PENDING },

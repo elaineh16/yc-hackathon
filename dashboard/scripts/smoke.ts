@@ -96,6 +96,14 @@ check(d.workOrder.staff.status === "REQUESTED", "staff request created (REQUESTE
 check(d.workOrder.timeline.filter((e: any) => e.type === "intake.saved").length === 1, "one intake.saved event");
 check((await student(A)).workOrder?.id === woId, "student A sees their work order");
 check((await student(B)).sessionValid && (await student(B)).workOrder === null, "student B cannot see A's work order");
+{
+  // A reopened page (new session C) reporting the same washer takes the order over; A no longer sees it.
+  const C = await newSession();
+  const r = await intake(demoReport(C, { symptom: "Washer won't drain, door locked, clothes inside" }));
+  check(r.body.work_order_id === woId && (await student(C)).workOrder?.id === woId && (await student(A)).workOrder === null, "repeat report from a reopened page moves the order to that page");
+  await intake(demoReport(A, { symptom: "Washer won't drain, door locked, clothes inside" }));
+  check((await student(A)).workOrder?.id === woId, "order follows the latest reporting session");
+}
 
 console.log("\n2. Guards before approval");
 check((await op("simulateConfirmation", { workOrderId: woId })).status === 409, "confirmation before approval -> 409");
