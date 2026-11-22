@@ -46,3 +46,29 @@ Use Prisma and PostgreSQL for the demo session, work order, staff request, seede
 - [ ] The dashboard shows both seeded offers and Metro's voicemail, clearly labeled simulated, and explains the recommendation.
 - [ ] The manager sees the $400 cap. The simulated confirmation only works after approval, and the student's arrival window appears after confirmation.
 - [ ] Reset clears the demo and a fresh student session can run the same script again.
+
+
+## Required observability: TraceRoot
+
+TraceRoot is a required part of the demo, not a later optional add-on. Instrument the Node.js/Wasp server and the complete agent/tool workflow so a run can be inspected from voice-session creation through intake persistence, work-order orchestration, staff and contractor decisions, manager approval, simulated confirmation, and student updates.
+
+- Use the TraceRoot TypeScript SDK in the server runtime. Initialize it once during server startup, before request handlers and workflow functions run. Use the TraceRoot CLI setup flow to generate the framework-appropriate instrumentation rather than guessing SDK APIs.
+- Add explicit TraceRoot/OTel spans around Relay's own workflow boundaries: voice-session credential creation, authenticated ElevenLabs intake tool, work-order create/update, duplicate/idempotency handling, safety escalation, staff request/status changes, contractor-result ingestion, recommendation, manager approve/deny, confirmation guard, simulated appointment confirmation, student update, reset, and error/retry paths.
+- Correlate spans with a non-sensitive demo session ID and work-order ID. Propagate trace context where the browser/tool transport supports it; otherwise attach the same correlation identifiers as safe span attributes. Record outcome, duration, simulation flag, and rejection/error category.
+- TraceRoot does not automatically expose ElevenLabs' hosted model internals just because the browser SDK is connected. Instrument the server-visible tool calls and lifecycle events explicitly. Do not claim to have traced hidden provider reasoning or model tokens unless the provider actually exposes them.
+- Keep the TraceRoot project API key server-side. Never put it in a `NEXT_PUBLIC_*` variable, browser bundle, HTML, client-side SDK config, or Git. Do not capture raw audio, full transcripts, phone numbers, student names, or credentials in trace attributes. Use synthetic demo data and redacted/minimal inputs.
+- Trace export must be fail-open: TraceRoot downtime or export errors must not break intake, staff workflows, approval enforcement, or the demo. Application/database state remains the source of truth.
+- Add a small Relay evaluation dataset and detectors for false intake-success claims, unsafe dispatch, duplicate work orders, approval bypass, misrepresented contractor scope, invented Metro availability/price, and incorrect student updates.
+
+### TraceRoot acceptance gate
+
+- [ ] A clean happy-path run produces a TraceRoot trace with the expected Relay workflow spans and a usable session/work-order correlation ID.
+- [ ] A failed intake produces an error trace and Relay does not tell the student the report was saved.
+- [ ] Duplicate intake is visible as an idempotent update, not a second work order.
+- [ ] A safety hazard records escalation and does not continue the routine repair path.
+- [ ] A confirmation attempt before manager approval records a rejected transition and creates no appointment.
+- [ ] Manager denial leaves the appointment unconfirmed.
+- [ ] TraceRoot outage does not break the user-facing workflow.
+- [ ] At least the initial Relay golden cases run through TraceRoot evaluations, and the critical detectors can flag intentionally injected failures.
+
+See [`docs/TRACEROOT.md`](docs/TRACEROOT.md) for setup, span design, data handling and verification.
