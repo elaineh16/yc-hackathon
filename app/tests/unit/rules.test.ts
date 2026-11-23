@@ -197,3 +197,13 @@ describe("spending and scheduling rules", () => {
     assert.equal(overlaps(at(9), at(11), at(11), at(13)), false);
   });
 });
+
+describe("case titles", () => {
+  test("an answer of 'other' never makes a title like 'Leak at the somewhere else': the resident's words name it", () => {
+    const t = triage({ description: "Water is dripping from the ceiling light fixture in my bathroom.", categoryHint: "PLUMBING", details: { fixture: "other", activeLeak: true, spreading: true, waterNearElectrical: true, canShutOff: false } });
+    assert.doesNotMatch(t.title, /somewhere else/i);
+    assert.match(t.title, /ceiling light fixture/i);
+    assert.equal(triage({ description: "Sink leaking", categoryHint: "PLUMBING", details: { fixture: "kitchen_sink", activeLeak: true } }).title, "Leak at the kitchen sink");
+    assert.doesNotMatch(triage({ description: "The dryer makes a grinding noise.", categoryHint: "APPLIANCE", details: { appliance: "dryer", problem: "other" } }).title, /something else/i);
+  });
+});

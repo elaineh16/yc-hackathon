@@ -668,7 +668,13 @@ function Suggestion({ p }: { p: AiProposalView }) {
         <Provenance kind="ai-proposal" label="AI proposal, not done yet" />
         <Sparkles className="size-4" /> {p.summary}
       </p>
-      <p className="mt-1 text-sm text-ink-2">{p.rationale}</p>
+      {p.rationale && (
+        <p className="mt-1 text-sm text-ink-2">
+          {/* The model's own wording: only drafts to residents and notes on businesses are checked against the facts. */}
+          <span className="text-muted">Relay AI's reason, in its own words (not checked): </span>
+          {p.rationale}
+        </p>
+      )}
       {p.kind === "MESSAGE_RESIDENT" && (
         <>
           <Textarea className="mt-2 bg-surface" value={text} onChange={(e) => setText(e.target.value)} aria-label="Message to the resident" />

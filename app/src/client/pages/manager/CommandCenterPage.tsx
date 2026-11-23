@@ -127,7 +127,7 @@ function Command({ name }: { name: string }) {
                         <Ref>{s.caseRef}</Ref>
                       </p>
                       <p className="mt-1.5 text-sm font-medium">{s.summary}</p>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{s.rationale}</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{s.rationale ? `AI's reason (not checked): ${s.rationale}` : null}</p>
                     </Link>
                   </li>
                 ))}

@@ -138,8 +138,11 @@ function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text:
           </div>
         ))}
         {view.pending && view.pendingSince && (
-          <p className="flex items-center gap-2 text-sm text-muted" data-testid="chat-pending">
-            <Bot className="size-4 text-ai" /> Message saved. Relay is writing a reply (<Elapsed since={view.pendingSince} />). On this local model it can take up to a minute.
+          <p className="flex items-start gap-2 text-sm text-muted" data-testid="chat-pending">
+            <Bot className="mt-0.5 size-4 shrink-0 text-ai" />
+            <span>
+              Message saved. Relay is writing a reply (<Elapsed since={view.pendingSince} />). On this local model it can take up to a minute.
+            </span>
           </p>
         )}
         <div ref={end} />

@@ -128,6 +128,11 @@ export async function move(tx: Tx, c: LoadedCase, action: Action, actor: ActorCt
       ...(trigger ? { agentPendingSince: now, agentPendingTrigger: trigger, agentPendingEventId: eventId } : {}),
     },
   });
+  // A closed case leaves nothing for the AI's pending proposals to act on: they close with it, so no suggestion stays
+  // actionable (or shows as "not done yet") once the outcome is known.
+  if (to === "RESOLVED" || to === "CANCELLED") {
+    await tx.agentProposal.updateMany({ where: { caseId: c.id, status: "PENDING" }, data: { status: "SUPERSEDED", outcome: `Not acted on: the case was ${to === "RESOLVED" ? "resolved" : "cancelled"}.`, decidedAt: now } });
+  }
   mark("relay.case.transition", { caseId: c.id, action, from, to, actor: actor.kind });
   c.status = to; // keep the loaded copy current so one action can chain two transitions
   return to;

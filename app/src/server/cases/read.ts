@@ -298,7 +298,8 @@ async function caseAi(c: LoadedCase): Promise<CaseAi> {
     assessment: c.aiAssessment,
     assessedAt: iso(c.aiAssessedAt),
     pending: c.agentPendingSince !== null || runs.some((r) => r.status === "RUNNING"),
-    proposals: proposals.map(proposalView),
+    // A proposal left pending on a case closed before proposals closed with their case is shown as what it is now.
+    proposals: proposals.map((p) => proposalView(p.status === "PENDING" && (c.status === "RESOLVED" || c.status === "CANCELLED") ? { ...p, status: "SUPERSEDED", outcome: "Not acted on before the case closed." } : p)),
     runs: runs.map(
       (r): AgentRunView => ({
         id: r.id,

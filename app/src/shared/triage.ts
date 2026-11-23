@@ -369,14 +369,17 @@ export function triage(input: TriageInput): TriageResult {
 
   // 5. Title and summary, built only from what was actually reported.
   const label = (key: string) => optionLabel(category, key, details[key] ?? null).toLowerCase();
+  // An answer of "other" ("Somewhere else", "Something else") says nothing a title can use: the resident's own first
+  // sentence names it instead ("Leak at the somewhere else" was the old result).
+  const known = (key: string) => details[key] !== undefined && details[key] !== null && details[key] !== "other";
   let title = input.title?.replace(/\s+/g, " ").trim().slice(0, 80) || "";
   if (!title) {
-    if (category === "PLUMBING" && details.fixture) title = `${details.activeLeak === true ? "Leak" : "Problem"} at the ${label("fixture")}`;
-    else if (category === "APPLIANCE" && details.appliance) title = `${optionLabel(category, "appliance", details.appliance)}: ${label("problem") || "not working"}`;
-    else if (category === "HVAC" && details.system) title = `${optionLabel(category, "system", details.system)} ${details.completelyOut === true ? "not working" : "problem"}`;
-    else if (category === "ELECTRICAL" && details.what) title = `Electrical: ${label("what")}`;
-    else if (category === "ACCESS" && details.issue) title = optionLabel(category, "issue", details.issue);
-    else if (category === "ELEVATOR" && details.problem) title = `Elevator: ${label("problem")}`;
+    if (category === "PLUMBING" && known("fixture")) title = `${details.activeLeak === true ? "Leak" : "Problem"} at the ${label("fixture")}`;
+    else if (category === "APPLIANCE" && known("appliance")) title = `${optionLabel(category, "appliance", details.appliance)}: ${known("problem") ? label("problem") : "not working"}`;
+    else if (category === "HVAC" && known("system")) title = `${optionLabel(category, "system", details.system)} ${details.completelyOut === true ? "not working" : "problem"}`;
+    else if (category === "ELECTRICAL" && known("what")) title = `Electrical: ${label("what")}`;
+    else if (category === "ACCESS" && known("issue")) title = optionLabel(category, "issue", details.issue);
+    else if (category === "ELEVATOR" && known("problem")) title = `Elevator: ${label("problem")}`;
     else title = sentence(description) || "Maintenance request";
   }
   const facts = QUESTIONS[category]

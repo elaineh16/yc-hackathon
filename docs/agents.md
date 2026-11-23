@@ -79,7 +79,7 @@ The coordinator reviews a case whenever something happens on it.
 
 | Proposal | What decides |
 | --- | --- |
-| Offer to a vendor | Only refs from `list_vendors`, which reads the property's approved directory. Blocked for emergencies, escalations, cases needing review, noise matters, or a vendor who already declined. Sent automatically only for ROUTINE cases at properties with autopilot on and a vendor with a Relay login; otherwise held for a manager |
+| Offer to a vendor | Only refs from `list_vendors`, which reads the property's approved directory. Blocked for emergencies, escalations, cases needing review, noise matters, or a vendor who already declined. Sent automatically only for ROUTINE cases at properties with autopilot on and a vendor with a Relay login; otherwise held for a manager. The model's stated reason is shown to the manager labelled "not checked" |
 | Resident update | Must pass the grounding check against what the resident may see; then always held for a manager |
 | Escalation | Runs at once only if the deterministic safety rules also see a hazard in the resident's words and facts; otherwise it is a suggestion for the manager |
 | Vendor discovery | Only when no approved vendor can take the case; searches are budgeted and cached (see [fiber.md](fiber.md)) |
