@@ -1,0 +1,253 @@
+WEBVTT
+
+1
+00:00:01.340 --> 00:00:03.297
+Residents report problems.
+
+2
+00:00:03.297 --> 00:00:08.867
+Property managers coordinate staff, contractors, approvals and follow-ups.
+
+3
+00:00:08.867 --> 00:00:13.007
+Relay brings that process into one AI-powered workflow.
+
+4
+00:00:13.007 --> 00:00:18.050
+This is the manager's command center: what needs a person, and why.
+
+5
+00:00:19.550 --> 00:00:23.929
+Priya, a resident, reports a leak from a phone, in plain words.
+
+6
+00:00:23.929 --> 00:00:25.458
+This is the text chat.
+
+7
+00:00:25.458 --> 00:00:29.420
+Voice intake uses the same path, but it isn't shown here.
+
+8
+00:00:29.420 --> 00:00:34.842
+Relay's replies come from a local language model, running as a background job.
+
+9
+00:00:34.842 --> 00:00:38.735
+Its thinking time is cut from the recording, and marked.
+
+10
+00:00:38.735 --> 00:00:41.098
+It asks what it needs, then files.
+
+11
+00:00:41.098 --> 00:00:47.910
+The case is saved by the server, and the confirmation comes from the database, not from the model.
+
+12
+00:00:56.657 --> 00:01:02.764
+Morgan, the property manager, sees Priya's new case at the top of the queue, and opens it.
+
+13
+00:01:02.764 --> 00:01:08.193
+The case workspace shows what Priya reported, and what Relay understood from it,
+
+14
+00:01:08.193 --> 00:01:12.400
+with its assumptions kept apart from what Priya actually said.
+
+15
+00:01:12.400 --> 00:01:18.643
+"What Relay did" lists the coordinator's real tool calls, and what policy did with each one.
+
+16
+00:01:18.643 --> 00:01:20.611
+It also suggested escalating.
+
+17
+00:01:20.611 --> 00:01:27.329
+The safety rules found no hazard in Priya's words, so that stays a suggestion for Morgan to decide.
+
+18
+00:01:27.329 --> 00:01:31.468
+Relay proposed Harbour Plumbing & Drain, an approved plumber.
+
+19
+00:01:31.468 --> 00:01:37.847
+Autopilot is off at this property, so the offer waits for Morgan, who reviews it and sends it.
+
+20
+00:01:42.347 --> 00:01:47.275
+Separately, an air-conditioning report came in from the same building,
+
+21
+00:01:47.275 --> 00:01:50.937
+where no heating and cooling contractor is approved.
+
+22
+00:01:50.937 --> 00:01:52.345
+Relay spots the gap.
+
+23
+00:01:52.345 --> 00:01:58.048
+At this building it asks before spending anything, so Morgan approves one search.
+
+24
+00:01:58.048 --> 00:02:00.301
+This is a live call to Fiber AI.
+
+25
+00:02:00.301 --> 00:02:04.948
+Twenty real local businesses came back, Relay kept the best three,
+
+26
+00:02:04.948 --> 00:02:10.017
+and the provider's charge, two credits, is recorded exactly as returned.
+
+27
+00:02:10.017 --> 00:02:11.848
+Discovery is not approval.
+
+28
+00:02:11.848 --> 00:02:17.832
+Nobody has checked a licence or insurance, and Relay never contacts these businesses.
+
+29
+00:02:17.832 --> 00:02:21.212
+Morgan only shortlists one, to check personally.
+
+30
+00:02:25.712 --> 00:02:26.904
+Back to the leak.
+
+31
+00:02:26.904 --> 00:02:33.076
+Jo, from Harbour Plumbing & Drain, a fictional test contractor, gets the offer by phone.
+
+32
+00:02:33.076 --> 00:02:39.458
+Jo reads the request, accepts the job with an estimate of three hundred and twenty dollars,
+
+33
+00:02:39.458 --> 00:02:41.492
+and proposes two visit times.
+
+34
+00:02:45.992 --> 00:02:51.077
+Three hundred and twenty dollars is over this building's approval threshold,
+
+35
+00:02:51.077 --> 00:02:54.689
+so the money decision goes to Morgan, never to the AI.
+
+36
+00:02:54.689 --> 00:02:59.105
+Morgan approves it, with a cap of three hundred and fifty dollars.
+
+37
+00:02:59.105 --> 00:03:01.447
+The next step now belongs to Priya.
+
+38
+00:03:06.173 --> 00:03:09.432
+Priya sees the proposed times, and picks one.
+
+39
+00:03:09.432 --> 00:03:11.098
+The visit is confirmed.
+
+40
+00:03:15.598 --> 00:03:19.548
+Jo starts the work, and reports exactly what was done.
+
+41
+00:03:24.552 --> 00:03:27.889
+But finished work isn't the same as a solved problem.
+
+42
+00:03:27.889 --> 00:03:31.352
+Relay asks Priya whether it's really fixed, in the app,
+
+43
+00:03:35.852 --> 00:03:36.814
+and by email.
+
+44
+00:03:36.814 --> 00:03:39.477
+This is Mailpit, a local test inbox.
+
+45
+00:03:39.477 --> 00:03:44.952
+Relay records this email as captured by a test server, never as delivered.
+
+46
+00:03:46.988 --> 00:03:50.763
+Priya confirms it's fixed, and the case is resolved.
+
+47
+00:03:55.057 --> 00:03:57.868
+A repair that doesn't hold is handled too.
+
+48
+00:03:57.868 --> 00:04:01.549
+Daniel's dishwasher was repaired, but it stopped again.
+
+49
+00:04:01.549 --> 00:04:05.632
+Daniel says so, and the case reopens for Morgan to follow up.
+
+50
+00:04:10.132 --> 00:04:16.207
+When a request is unclear, Relay asks what is going on, instead of guessing a diagnosis.
+
+51
+00:04:20.707 --> 00:04:24.670
+Possible emergencies and lockouts always go to a person.
+
+52
+00:04:24.670 --> 00:04:31.535
+Water near a light fixture is escalated at once, and a lockout waits for staff to check identity.
+
+53
+00:04:31.535 --> 00:04:34.649
+The safety rules are a net, not a guarantee.
+
+54
+00:04:34.649 --> 00:04:39.744
+In a held-out test, the system escalated eleven of thirteen emergencies,
+
+55
+00:04:39.744 --> 00:04:43.212
+which is why anything uncertain goes to a person.
+
+56
+00:04:44.712 --> 00:04:50.537
+And access is enforced by the server: Sam, from another firm, can't open this job.
+
+57
+00:04:55.037 --> 00:04:59.564
+Back in Morgan's workspace: one report, one coordinated workflow,
+
+58
+00:04:59.564 --> 00:05:06.181
+three people acting on the same case, every step recorded, a follow-up, and a verified outcome.
+
+59
+00:05:06.181 --> 00:05:10.290
+The follow-up log shows each message's real delivery state.
+
+60
+00:05:10.290 --> 00:05:15.374
+The local test mail server was briefly unreachable during this recording,
+
+61
+00:05:15.374 --> 00:05:18.717
+so some emails are marked failed, not delivered.
+
+62
+00:05:20.217 --> 00:05:20.678
+Relay.
+
+63
+00:05:20.678 --> 00:05:24.367
+From resident request to accountable resolution.

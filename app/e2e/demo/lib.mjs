@@ -27,7 +27,7 @@ export async function launch() {
 }
 
 /** A visible pointer: an arrow on desktop, a soft dot on phones, and a ring on each click. Visual aid only. */
-const CURSOR = `(() => {
+export const CURSOR = `(() => {
   if (window.__relayCursor) return;
   window.__relayCursor = true;
   const touch = matchMedia("(pointer: coarse)").matches || innerWidth < 600;
@@ -95,7 +95,7 @@ export async function scene(page, dir, name) {
     mark: (label, extra = {}) => marks.push({ label, t: now(), ...extra }),
     /** Remembers where an element is (in frame pixels) so the renderer can zoom to it. */
     focus: async (label, locator, pad = 24) => {
-      const b = await locator.boundingBox().catch(() => null);
+      const b = await locator.boundingBox({ timeout: 4000 }).catch(() => null);
       if (b) marks.push({ label, t: now(), focus: { x: (b.x - pad) * dpr, y: (b.y - pad) * dpr, w: (b.width + 2 * pad) * dpr, h: (b.height + 2 * pad) * dpr } });
     },
     stop: async () => {

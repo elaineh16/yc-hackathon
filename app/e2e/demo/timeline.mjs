@@ -27,7 +27,7 @@ export function buildTimeline({ work, items, durations, texts, output, videoBits
     if (it.kind === "card") {
       images.push(it.image);
       const duration = Math.max(it.minSeconds ?? 3, lead + speech + 1.2);
-      clip = { id: `c${n}`, image: it.image, start: t, duration, fadeIn: n ? FADE : 0 };
+      clip = { id: `c${n}`, image: it.image, start: t, duration, fadeIn: n ? FADE : 0, quiet: it.quiet === true };
     } else {
       const m = read(join(work, it.dir, "manifest.json"));
       const frames = m.frames.map((f) => ({ file: f.file, t: f.t }));
@@ -93,6 +93,8 @@ export function buildTimeline({ work, items, durations, texts, output, videoBits
         segments,
         device: it.device,
         label: it.label,
+        side: it.side,
+        title: it.title,
         zooms,
         start: t,
         duration,

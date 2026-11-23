@@ -1,15 +1,21 @@
 // Writes docs/demo from the actual render timelines: timestamped scripts, the shot list, metadata, captions, and
 // screenshots taken from the real captured frames. Without a product recording yet, the product script and shot list
 // are written as planned (narration and scenes, no timings) and say so.
-// Usage (from app/e2e): node demo/write-docs.mjs <techWorkDir> <techMp4> [<productWorkDir> <productMp4>] [--release <url>]
+// Usage (from app/e2e): node demo/write-docs.mjs <techWorkDir> <techMp4> <productWorkDir> <productMp4> --fiber <fiberWorkDir>
+//                        [--release <url>] [--voice "<narration voice>"]
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { productNarration, productScenes } from "./narration.mjs";
+import { productScenes } from "./narration.mjs";
 
 const args = process.argv.slice(2);
-const ri = args.indexOf("--release");
-const releaseUrl = ri >= 0 ? args.splice(ri, 2)[1] : null;
+const flag = (name) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args.splice(i, 2)[1] : null;
+};
+const releaseUrl = flag("release");
+const fiberWork = flag("fiber");
+const voice = flag("voice") ?? 'Kokoro-82M "af_heart" (open weights, Apache-2.0), run locally on the CPU';
 const [techWork, techMp4, work, productMp4] = args;
 const here = dirname(fileURLToPath(import.meta.url));
 const docs = join(here, "..", "..", "..", "docs", "demo");
@@ -21,23 +27,25 @@ const sidecar = (p) => (p && existsSync(`${p}.json`) ? JSON.parse(readFileSync(`
 const haveProduct = !!work && existsSync(join(work, "timeline.json"));
 
 const SHOTS = {
-  "cards/title.png": ["Title card", "Relay, what it is for."],
-  "01-resident-chat": ["Resident, phone: chat intake", "Priya types a leak report; Relay (local model) asks follow-up questions; the server files the case and confirms; she opens her case page."],
-  "02-manager-workspace": ["Manager: command center and case workspace", "\"Your move\" in the command center; the case: status, next action and reason, Relay's reading, \"What Relay did\" (recorded tool calls), the AI proposal and its policy note; the offer is sent."],
-  "03-discovery": ["Manager: vendor discovery (fixture data)", "The discovery search and its candidates (labelled fixture data); a business is verified with a note, approved for the property, and offered the job."],
-  "04-contractor-accepts": ["Contractor, phone: the offer", "Sam enters a $320 estimate and accepts; it waits for the manager's approval."],
-  "05-manager-approves": ["Manager: money decision", "The estimate is over the approval threshold; Morgan approves with a $350 cap."],
-  "06-resident-time": ["Resident, phone: visit time", "Priya picks a proposed time; the visit is confirmed."],
-  "07-contractor-completes": ["Contractor, phone: the work", "Sam starts the work, writes what he did and marks it complete."],
-  "08-resident-followup": ["Resident, phone: in-app follow-up", "\"Is it fixed?\" and the notification in her inbox."],
-  "09-mailpit": ["Local test inbox (Mailpit)", "The follow-up email, captured by Mailpit (recorded by Relay as captured, not delivered)."],
+  "00-intro": ["Manager: the command center", "The title over the real command center: what needs a person, and why."],
+  "01-resident-chat": ["Resident, phone: chat intake", "Priya reports a leak; Relay (the local model) asks follow-up questions; the server files the case and confirms it."],
+  "02-manager-workspace": ["Manager: the case workspace", "\"Your move\"; the case: next action, Relay's reading (what was said and what was assumed), \"What Relay did\" (the recorded tool calls), the AI proposal with its policy note; the manager sends the offer."],
+  "03-fiber": ["Manager: live Fiber AI vendor discovery", "An AC case at a building with no approved HVAC contractor: the coverage gap, the manager approves one search, real businesses come back with Relay's checks and the provider's chargeInfo; one is shortlisted, none verified or contacted."],
+  "04-contractor-accepts": ["Contractor, phone: the offer", "The contractor reads the request, enters a $320 estimate and two visit times, and accepts; it waits for the manager's approval."],
+  "05-manager-approves": ["Manager: the money decision", "The estimate is over the approval threshold; the manager approves it with a $350 cap; the next step moves to the resident."],
+  "06-resident-time": ["Resident, phone: the visit time", "Priya picks one of the proposed times; the visit is confirmed."],
+  "07-contractor-completes": ["Contractor, phone: the work", "The contractor starts the work, writes what was done and marks it complete."],
+  "08-resident-followup": ["Resident, phone: \"Is it fixed?\"", "Completion is not resolution: the case asks Priya, and the in-app notification is in the inbox."],
+  "09-mailpit": ["Local test inbox (Mailpit)", "The same follow-up by email, captured by Mailpit (recorded by Relay as captured, never as delivered)."],
   "10-resident-confirms": ["Resident, phone: confirmation", "\"Yes, resolved\"; the case shows Resolved."],
-  "11-timeline": ["Manager: audit trail", "The case timeline labelled by who acted, and the follow-up log with each notification's delivery state."],
-  "12-vague": ["Resident, phone: a vague report", "A deliberately vague message and Relay's reply."],
-  "13-guard": ["Another contractor, phone: authorization", "Jo opens Sam's job by its address and gets \"could not be found\"."],
-  "cards/end.png": ["End card", "What is real in V1.1, and the test evidence."],
+  "11-not-fixed": ["Another resident, phone: not fixed", "Daniel's dishwasher was repaired (set up through the API) but stopped again: \"No, still having problems\" reopens the case."],
+  "12-vague": ["Resident, phone: an unclear request", "A deliberately vague message and Relay's reply."],
+  "13-safety": ["Manager: a possible emergency and a lockout", "\"Needs attention\" in the command center; the escalated water-near-a-light case and the lockout waiting for an identity check."],
+  "14-guard": ["Another contractor, phone: authorization", "A contractor from another firm opens the job's address and gets \"This job is not available\"."],
+  "15-final": ["Manager: the record of the case", "The resolved case: its history labelled by who acted, and the follow-up log with each notification's delivery state."],
+  "cards/end.png": ["Closing card", "\"Relay. From resident request to accountable resolution.\" and the repository."],
 };
-const realness = (key) => (key.startsWith("cards/") ? "Card (text, not app footage)" : key === "03-discovery" ? "Real app; discovery in fixture mode (fictional businesses), labelled" : key === "09-mailpit" ? "Real Mailpit inbox (local test server)" : "Real app");
+const realness = (key) => (key.startsWith("cards/") ? "Card (text, not app footage)" : key === "03-fiber" ? "Real app; a live Fiber AI search returning real businesses" : key === "09-mailpit" ? "Real Mailpit inbox (local test server)" : key === "11-not-fixed" ? "Real app; the repair before it was set up through the API" : "Real app");
 
 function timedTable(tl, narration, start, titleFor) {
   const byId = Object.fromEntries(narration.map((n) => [n.id, n.text.replace(/\s*\|\s*/g, " ")]));
@@ -88,81 +96,77 @@ ${timedTable(techTl, techNarration, techSide?.timelineStart ?? 0, (k, c) => (c.d
 for (const f of ["relay-technical-walkthrough.srt", "relay-technical-walkthrough.vtt"]) if (existsSync(join(techWork, f))) copyFileSync(join(techWork, f), join(docs, "captions", f));
 
 // ───────────────────────── product demo ─────────────────────────
-let product = null;
-if (haveProduct) {
-  const tl = readIn(work, "timeline.json");
-  const narration = readIn(work, "narration.json");
-  const facts = readIn(work, "facts.json");
-  const side = sidecar(productMp4);
-  const cuts = tl.clips.flatMap((c) => c.cuts ?? []).map((c) => Number(c.text.match(/^(\d+)/)?.[1] ?? 0));
-  writeFileSync(
-    join(docs, "PRODUCT_DEMO_SCRIPT.md"),
-    `# Product demo: script and timing
+if (!haveProduct || !fiberWork) throw new Error("usage: write-docs.mjs <techWorkDir> <techMp4> <productWorkDir> <productMp4> --fiber <fiberWorkDir>");
+const tl = readIn(work, "timeline.json");
+const narration = readIn(work, "narration.json");
+const facts = readIn(work, "facts.json");
+const fiber = readIn(fiberWork, "facts.json");
+const scenes = productScenes(facts, fiber);
+const side = sidecar(productMp4);
+const cuts = tl.clips.flatMap((c) => c.cuts ?? []).map((c) => Number(c.text.match(/^(\d+)/)?.[1] ?? 0));
+const footage = tl.clips.filter((c) => c.dir).reduce((a, c) => a + c.duration, 0);
+const d = fiber.discovery ?? {};
+const oneLine = (x, n) => String(x ?? "").replace(/\s+/g, " ").slice(0, n);
+writeFileSync(
+  join(docs, "PRODUCT_DEMO_SCRIPT.md"),
+  `# Product demo: script and timing
 
-The voiceover of \`relay-product-demo.mp4\`. Narration: the Windows "Microsoft Mark" voice, generated locally.
-Captions: \`captions/relay-product-demo.srt\` (also burned into the video).
+"Relay: from request to resolution", the voiceover of \`relay-product-demo.mp4\`.
 
-- **Length:** ${mmss(side?.mediaDuration ?? tl.duration)}, 1920×1080, H.264/AAC.
-- **Footage:** recorded from the running app by \`app/e2e/demo/capture-product.mjs\`.
-- **Edits:** ${cuts.length} cuts of model thinking time, ${cuts.reduce((a, b) => a + b, 0)} seconds in all, each marked on screen.
-- **What the model did in this recording:**
-  - the coordinator ${facts.acceptedAiProposal ? "proposed an approved plumber, held for the manager, who sent it" : "did not propose a vendor, so the manager chose one"};
-  - the vague report ${facts.vagueFiled ? "was filed for a person to classify" : "was answered with a question"}.
+- **Length:** ${mmss(side?.mediaDuration ?? tl.duration)}, 1920×1080, H.264/AAC, rendered by Chrome's MediaRecorder from
+  \`app/e2e/demo/make-product.mjs\`. ${Math.round((footage / tl.duration) * 100)}% of it is footage of the running app; the rest is the closing card.
+- **Narration:** ${voice}. Captions: \`captions/relay-product-demo.srt\` and \`.vtt\` (also burned into the video).
+- **Footage:** recorded from the running app by \`app/e2e/demo/capture-product.mjs\`, plus the vendor discovery scene from
+  \`capture-fiber.mjs\`, which was the live Fiber AI integration check.
+- **Edits:** ${cuts.length} cuts of model thinking time, ${cuts.reduce((a, b) => a + b, 0)} seconds in all, each marked on screen. Long
+  stretches play at most 1.6 times faster. Nothing else is removed or changed.
+
+**What happened in this recording**
+
+- **The chat:** ${(facts.chat ?? []).map((c) => `Priya: "${oneLine(c.resident, 200)}" Relay: "${oneLine(c.relay, 200)}"`).join(" ")}
+- **The coordinator** ${facts.acceptedAiProposal ? `proposed ${facts.vendorName}, an approved plumber. It waited for the manager, who sent it` : `did not propose an approved plumber the demo could use, so the manager chose ${facts.vendorName}`}.
+- **Fiber AI:** ${fiber.reused ? "an earlier live search was reused (no new call)" : `a live search, approved by the manager in the interface: ${d.placesReturned} places, ${d.candidatesKept} kept, ${d.creditsCharged} credits (chargeInfo \`${d.chargeInfo}\`)`}. ${fiber.shortlisted ? `${fiber.shortlisted} was shortlisted; nothing was verified, contacted or approved.` : "Nothing was shortlisted."}
+- **Not fixed:** after "No, still having problems", the dishwasher case is ${facts.notFixed?.status ?? "unknown"}.
+- **The unclear request** ${facts.vagueFiled ? "was filed for a person to classify" : `was answered with a question: "${oneLine(facts.vagueReply, 220)}"`}.${(facts.vagueTakes ?? []).filter((t) => !t.used).map((t) => ` This scene was recorded twice. In take ${t.take}, not shown, ${t.why}: "${oneLine(t.reply, 160)}".`).join("")}${facts.escalationSuggested ? "\n- **A second AI proposal:** the coordinator also suggested escalating the leak. The safety rules found no hazard, so it stayed a suggestion for the manager, and it is visible in the case workspace scene." : ""}
+- **Safety:** the possible emergency is ${facts.ceiling?.status ?? "?"}, and the lockout is ${facts.lockout?.status ?? "?"}.
+- **Email on the leak case, as Relay recorded it:** ${Object.entries((facts.final?.followUps ?? []).filter((x) => x.channel === "EMAIL").reduce((a, x) => ((a[x.status] = (a[x.status] ?? 0) + 1), a), {})).map(([k, v]) => `${v} ${k}`).join(", ") || "none"}. The local Mailpit server's port forwarding broke during the recording (a Docker port proxy left stale by an earlier WSL restart). Emails sent in that window were retried and then marked failed, and none were shown as delivered. Mailpit was restarted, and the pending ones, including "Is this fixed?", were captured.
 
 ${timedTable(tl, narration, side?.timelineStart ?? 0, (k) => SHOTS[k]?.[0] ?? k)}
 `,
-  );
-  for (const f of ["relay-product-demo.srt", "relay-product-demo.vtt"]) if (existsSync(join(work, f))) copyFileSync(join(work, f), join(docs, "captions", f));
-  mkdirSync(join(docs, "screenshots"), { recursive: true });
-  const picks = [];
-  for (const c of tl.clips.filter((x) => x.dir)) {
-    const m = readIn(work, join(c.dir, "manifest.json"));
-    for (const f of m.marks.filter((x) => x.focus).slice(0, 2)) {
-      const frame = [...m.frames].reverse().find((x) => x.t <= f.t + 1.2) ?? m.frames[0];
-      const name = `${c.dir}-${f.label}.jpg`;
-      copyFileSync(join(work, c.dir, frame.file), join(docs, "screenshots", name));
-      picks.push(`screenshots/${name}`);
-    }
+);
+for (const f of ["relay-product-demo.srt", "relay-product-demo.vtt"]) if (existsSync(join(work, f))) copyFileSync(join(work, f), join(docs, "captions", f));
+mkdirSync(join(docs, "screenshots"), { recursive: true });
+const picks = [];
+for (const c of tl.clips.filter((x) => x.dir)) {
+  const m = readIn(work, join(c.dir, "manifest.json"));
+  for (const f of m.marks.filter((x) => x.focus).slice(0, 2)) {
+    const frame = [...m.frames].reverse().find((x) => x.t <= f.t + 1.2) ?? m.frames[0];
+    const name = `${c.dir}-${f.label}.jpg`;
+    copyFileSync(join(work, c.dir, frame.file), join(docs, "screenshots", name));
+    picks.push(`screenshots/${name}`);
   }
-  product = { file: "relay-product-demo.mp4", seconds: Math.round(side?.mediaDuration ?? tl.duration), megabytes: sizeMb(productMp4), modelTimeCutSeconds: cuts.reduce((a, b) => a + b, 0), screenshots: picks, facts };
-} else {
-  const narration = productNarration({ acceptedAiProposal: true, vagueFiled: false });
-  writeFileSync(
-    join(docs, "PRODUCT_DEMO_SCRIPT.md"),
-    `# Product demo: script (planned, not yet recorded)
-
-The product demo has not been recorded yet. Recording needs the full stack, the local model and about 30 minutes of
-CPU (see [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md)). This is the narration it will use, scene by scene.
-
-- **Exact timings:** this file is rewritten with them by \`write-docs.mjs\` after recording.
-- **Sentences that follow the model:** where the model's behaviour can vary (whether the coordinator proposes a
-  vendor, how Relay answers the vague report), \`narration.mjs\` chooses the sentence from what the recording shows.
-  The wording below assumes the coordinator proposes a vendor and the vague report gets a question.
-
-| # | Scene | Narration |
-| --- | --- | --- |
-${productScenes.map((s, i) => `| ${i + 1} | ${SHOTS[s.dir ?? s.image]?.[0] ?? s.dir} | ${narration.find((n) => n.id === s.narration)?.text.replace(/\s*\|\s*/g, " ") ?? ""} |`).join("\n")}
-`,
-  );
 }
+const product = { file: "relay-product-demo.mp4", seconds: Math.round(side?.mediaDuration ?? tl.duration), megabytes: sizeMb(productMp4), footageShare: Number((footage / tl.duration).toFixed(2)), modelTimeCutSeconds: cuts.reduce((a, b) => a + b, 0), screenshots: picks };
 
 writeFileSync(
   join(docs, "SHOT_LIST.md"),
   `# Shot list (product demo)
 
 Every scene is real interaction with the running app, one browser session per person: desktop at 1536×864 rendered at
-1.25x, phones at 390×844 at 2x. Model thinking time is cut and marked; nothing else is removed or changed.
-${haveProduct ? "" : "\n**Status:** planned; not yet recorded (see DEMO_RUNBOOK.md).\n"}
+1.25x (1920×1080 frames), phones at 390×844 at 2x. Model thinking time is cut and marked; nothing else is removed or
+changed.
+
 | # | Scene | What happens | Real or labelled |
 | --- | --- | --- | --- |
-${productScenes.map((s, i) => `| ${i + 1} | ${SHOTS[s.dir ?? s.image]?.[0] ?? s.dir} | ${SHOTS[s.dir ?? s.image]?.[1] ?? ""} | ${realness(s.dir ?? s.image)} |`).join("\n")}
+${scenes.map((x, i) => `| ${i + 1} | ${SHOTS[x.dir ?? x.image]?.[0] ?? x.dir} | ${SHOTS[x.dir ?? x.image]?.[1] ?? ""} | ${realness(x.dir ?? x.image)} |`).join("\n")}
 
-**Not in the video:**
+**Set up before recording, through the API (not shown):** a dishwasher (repaired by the appliance contractor, so it
+can be reported as not fixed on camera), water dripping from a bathroom light fixture (a possible emergency), and a
+lockout. Maple Court was set to ask a manager before any vendor search.
 
-- **Voice intake:** it needs a person speaking; the narration says the recording uses text.
-- **A live Fiber search:** no key was available.
-- **The background reports:** created through the API before recording. They are a dishwasher, an air conditioner
-  at a property with no heating and cooling vendor, and a possible emergency.
+**Not in the video:** voice intake (it needs a person speaking; the narration says the chat is text), onboarding a
+discovered business (it needs a manager's own check of a real business, which was not done), and a real email
+delivery (only the local test inbox).
 `,
 );
 
@@ -174,11 +178,11 @@ writeFileSync(
       release: releaseUrl,
       videos: [
         { file: "relay-technical-walkthrough.mp4", seconds: Math.round(techSide?.mediaDuration ?? techTl.duration), width: 1920, height: 1080, codec: "H.264 + AAC (Chrome MediaRecorder)", megabytes: sizeMb(techMp4), captions: "captions/relay-technical-walkthrough.srt", script: "TECHNICAL_WALKTHROUGH.md", narration: "Windows OneCore voice 'Microsoft Mark', local", avSyncMeasured: "audio vs captions within 0.1 s at two points (av-sync-check.mjs)" },
-        product ? { ...product, width: 1920, height: 1080, codec: "H.264 + AAC (Chrome MediaRecorder)", captions: "captions/relay-product-demo.srt", script: "PRODUCT_DEMO_SCRIPT.md", fiber: "fixture mode (fictional businesses), labelled on screen and in narration", voiceIntake: "not recorded; text chat shown" } : { file: "relay-product-demo.mp4", status: "not yet recorded: needs the full stack and the model; see DEMO_RUNBOOK.md" },
+        { ...product, title: "Relay: from request to resolution", width: 1920, height: 1080, codec: "H.264 + AAC (Chrome MediaRecorder)", captions: ["captions/relay-product-demo.srt", "captions/relay-product-demo.vtt"], script: "PRODUCT_DEMO_SCRIPT.md", shotList: "SHOT_LIST.md", narration: voice, fiber: fiber.reused ? "real results reused from an earlier live search (no new call)" : `live search through the manager interface: ${d.placesReturned} places, ${d.candidatesKept} kept, ${d.creditsCharged} credits`, voiceIntake: "not recorded; text chat shown" },
       ],
     },
     null,
     2,
   )}\n`,
 );
-console.log(`wrote docs/demo (${haveProduct ? "product and technical" : "technical; product planned"})`);
+console.log("wrote docs/demo (product and technical)");

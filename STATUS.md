@@ -8,37 +8,45 @@ are in [docs/evidence/](docs/evidence/).
 | Suite | Command (from `app/` unless noted) | Result | Log |
 | --- | --- | --- | --- |
 | Type-check | `npx tsc --noEmit -p tsconfig.json` | **clean** | |
-| Unit | `npx tsx --test tests/unit/*.test.ts` | **34 / 34 pass** | [unit-tests-run.txt](docs/evidence/unit-tests-run.txt) |
-| API: workflow, reliability, discovery, follow-ups, V1.1 rules, security review | `npx tsx --test --test-concurrency=1 tests/api/{workflow,reliability,discovery,followups,v11,audit}.test.ts` | **85 / 85 pass** | [api-tests-run.txt](docs/evidence/api-tests-run.txt) |
-| Browser journeys (Playwright, Chrome) | `cd app/e2e && npx playwright test journey` | **16 / 16 pass** (5.6 min) | [e2e-journey-run.txt](docs/evidence/e2e-journey-run.txt) |
-| Agents on the real model | `npx tsx --test --test-concurrency=1 tests/api/agent.test.ts` | **not rerun for V1.1**: the machine ran out of memory and battery headroom. The V1 run passed 2 / 2; the V1.1 agents were measured live by the evaluation harness, which uses mocked tools | [agent-tests-run.txt](docs/evidence/agent-tests-run.txt) (V1) |
-| Demo videos | `app/e2e/demo` (see [docs/demo/DEMO_RUNBOOK.md](docs/demo/DEMO_RUNBOOK.md)) | **Technical walkthrough rendered and checked** (4:49, audio and captions in sync within 0.1 s). **Product demo not yet recorded**: it needs the full stack and the model for about 30 minutes | [docs/demo/](docs/demo/) |
+| Unit | `npx tsx --test tests/unit/*.test.ts` | **35 / 35 pass** | [unit-tests-run.txt](docs/evidence/unit-tests-run.txt) |
+| API: workflow, reliability, discovery, follow-ups, V1.1 rules, security review | `npx tsx --test --test-concurrency=1 tests/api/{workflow,reliability,discovery,followups,v11,audit}.test.ts` | **86 / 86 pass** | [api-tests-run.txt](docs/evidence/api-tests-run.txt) |
+| Browser journeys (Playwright, Chrome) | `cd app/e2e && npx playwright test journey --retries=1` | **16 / 16 pass** (2.6 min; none needed the retry) | [e2e-journey-run.txt](docs/evidence/e2e-journey-run.txt) |
+| Agents on the real model | `npx tsx --test --test-concurrency=1 tests/api/agent.test.ts` | **2 / 2 pass** on `qwen2.5:3b` (CPU): the intake agent converses and files through the server (159 s); the coordinator wakes on the case, uses its tools, and every proposal passes policy (56 s) | [agent-tests-run.txt](docs/evidence/agent-tests-run.txt) |
+| Demo videos | `app/e2e/demo` (see [docs/demo/DEMO_RUNBOOK.md](docs/demo/DEMO_RUNBOOK.md)) | **Product demo** "Relay: from request to resolution": 5:26, 98% real app footage, live Fiber search, reviewed frame by frame while playing; narration onsets within 0.04 s of the timeline. **Technical walkthrough**: 4:49, audio and captions within 0.1 s | [docs/demo/](docs/demo/) |
 | AI evaluation, deterministic, with the safety gate | `npx tsx tests/eval/deterministic.ts --gate` | **gate passes** | [eval-deterministic.json](docs/evidence/eval-deterministic.json) |
 | AI evaluation, live model | `tests/eval/live.ts`, `tests/eval/live-coordinator.ts` | see [docs/ai-eval.md](docs/ai-eval.md) | [eval-summary.json](docs/evidence/eval-summary.json) |
 | GitHub Actions (`.github/workflows/ci.yml`) | type-check, unit, deterministic eval gate, every API suite, browser journeys, on Postgres and Mailpit with no model | **green** ([run 45162425486](https://github.com/elaineh16/yc-hackathon/actions/runs/45162425486)) | |
 | Screenshots, desktop, tablet and phone | `SCREENS=1 npx playwright test screens` | 28 | [docs/screenshots/v1.1/](docs/screenshots/v1.1/) |
 
 The API and browser suites need the dev server running with `RELAY_TEST_HOOKS=true` and `FIBER_MODE=fixture`, and
-Mailpit on :1025/:8025. They reset all cases.
+Mailpit on :1025/:8025. They reset all cases, and they refuse to start against a server whose Fiber mode could spend
+credits. Like CI, they ran with no model (`LLM_DISABLED=true`): several discovery tests expect the agents' documented
+"AI unavailable" path.
 
 ## Fiber AI (vendor discovery)
 
-- **Live calls: none.** No `FIBER_API_KEY` was available. The project environment and the user and machine
-  environment variables were checked by name only; no value was printed.
-- **Credits used:** 0. `chargeInfo` and warnings are recorded per search once a key is set; no live `chargeInfo`
-  exists yet.
-- **What ran instead:**
-  - The same SDK code path runs against Fiber-shaped fixture responses of fictional businesses (`FIBER_MODE=fixture`).
-  - The fixtures cover a normal result, empty results, provider down, credits exhausted (before and during), rate
-    limiting, a server error, an invalid key and a slow response.
-  - The fixture calls are counted, and the tests assert the cost controls.
-- **To validate live:**
-  1. Set `FIBER_API_KEY` in `app/.env.server`.
-  2. Run `npx tsx scripts/fiber-live-check.ts --yes` from `app/`.
+Verified live on 2026-11-23 with the key in `app/.env.server` (never printed, logged or committed). Details:
+[docs/fiber.md](docs/fiber.md#live-verification).
 
-  It makes one capped search (at most 3 businesses kept), checks the balance first, and refuses if the reserve or the
-  daily budget would be crossed. It writes the real `chargeInfo` and warnings to
-  `docs/evidence/fiber-live-check.json`.
+| Check | How | Result |
+| --- | --- | --- |
+| Key loads, fixture mode off | `scripts/fiber-live-check.ts` in the WSL dev environment (it loads `.env.server` itself) | Key set, `FIBER_MODE` unset, mode `live` |
+| Authentication and balance | The same script, without `--yes`: `GET /v1/get-org-credits` (free) | Authenticated: 2,500 of 2,500 credits |
+| One live search **through the manager interface** | The manager approved the search on an AC case at Maple Court (no approved HVAC contractor); recorded by `app/e2e/demo/capture-fiber.mjs` | 20 places, 3 kept, 17 filtered; `chargeInfo` `{"method":"charged-now","creditsCharged":2}`; no warnings |
+| Credits charged | Balance again (free) | 2,498: exactly 2 credits used |
+| Persistence, deduplication, manager view, no resident data sent | The discovery row, the candidates (`fiber:google-maps`, keyed by place id) and the case page | As expected ([evidence](docs/evidence/fiber-live-ui-search.json), [screenshot](docs/screenshots/v1.1/fiber-live-discovery-panel.png)) |
+| A test reset keeps the real search; reuse is free | `app/e2e/demo/check-fiber-retention.mjs` | Kept; a new case reused it with 0 credits |
+
+- **Script check versus interface check:** the script made only the free balance calls. The single paid search was
+  made through the manager interface, so it also exercised the job, the checks, the database and the page. The
+  script's `--yes` search was not run, because it would have repeated the same query for 2 more credits.
+- **Safeguards added for the live key:**
+  - the API and browser suites refuse to run unless the server's Fiber mode is `fixture` or `off`;
+  - the dev helper starts test servers with `FIBER_MODE=fixture`;
+  - fixture data and real data are never shown together;
+  - a test reset keeps real searches (the record of credits spent and the cache);
+  - the balance in Settings is re-read after a paid search.
+- **Total spent:** 2 credits. Nothing was verified, contacted, approved or offered work.
 
 ## Notifications: delivery states as tested
 
@@ -69,8 +77,8 @@ No email was sent outside this machine.
 
 ## Known limitations
 
-- **Fiber:** no live search has been made (no key). The integration is verified against Fiber-shaped fixtures through
-  the real SDK path, not against Fiber's servers.
+- **Fiber:** one live search (2 credits) is the whole of the live verification. Error responses (402, 429, 5xx) are
+  tested against fixtures only.
 - **Model quality and speed:**
   - The default model is a 3B model on CPU. It sometimes skips a question, picks the wrong tool, or over-escalates.
     Policy contains every one of those (see [docs/ai-eval.md](docs/ai-eval.md)), but the conversation quality is
@@ -88,7 +96,9 @@ No email was sent outside this machine.
   - Background jobs run as Wasp registers them with pg-boss 8: one job per queue, picked up every 2 seconds. A burst
     of case events queues coordinator reviews one after another.
 - **Not built:** password reset, account management, photos, and creating a property from the UI.
-- **Voice:** not re-verified with a live microphone in V1.1 (V1 verified it in text mode through the real agent).
+- **Voice:** not re-verified with a live microphone in V1.1 (V1 verified it in text mode through the real agent). The
+  ElevenLabs key now in `app/.env.server` is rejected by ElevenLabs (`401 invalid_api_key`, checked with a read-only
+  call on 2026-11-23), so voice intake cannot start until it is replaced.
 - **Not deployed:** it runs locally (see the README); no free host was found for a Node server, PostgreSQL and a
   model together.
 

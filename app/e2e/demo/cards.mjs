@@ -52,31 +52,15 @@ const brand = `<div class="brand"><div class="logo">R</div>Relay</div>`;
 
 export const productCards = [
   {
-    id: "title",
-    html: page(
-      `${brand}
-      <div style="margin-top:150px">
-        <div class="eyebrow">Product demo · V1.1</div>
-        <h1 style="margin-top:22px">An AI operations coordinator<br/>for residential buildings</h1>
-        <p class="lead" style="margin-top:36px">Residents report problems in their own words. Relay turns each one into a tracked case and coordinates it to a verified fix, with people in control of every decision that matters.</p>
-      </div>`,
-      `<span>Recorded from the running app · resident, manager and contractor</span><span class="mono">github.com/elaineh16/yc-hackathon</span>`,
-    ),
-  },
-  {
     id: "end",
     html: page(
       `${brand}
-      <h2 style="margin-top:70px">What is real in Relay V1.1</h2>
-      <div class="cols" style="grid-template-columns:repeat(3,1fr);margin-top:46px">
-        <div class="card"><h3>Intake</h3><p>Chat, voice and a form that needs no AI. Asks before filing vague reports; the server, not the model, saves the case.</p></div>
-        <div class="card"><h3>Coordination</h3><p>An event-driven coordinator proposes; deterministic policy decides. Money, scheduling and closing stay with people.</p></div>
-        <div class="card"><h3>Discovery</h3><p>Fiber AI vendor search when a building has no approved trade. Every business is verified by a manager before any work.</p></div>
-        <div class="card"><h3>Follow-up</h3><p>In-app and opt-in email, with honest delivery states: captured is never "delivered".</p></div>
-        <div class="card"><h3>Trust</h3><p>Row locks, a state machine, idempotent actions, durable jobs, a full audit trail, and a security review.</p></div>
-        <div class="card"><h3>Evidence</h3><p><span class="mono">34</span> unit · <span class="mono">85</span> API · <span class="mono">16</span> browser tests in CI, and an AI evaluation with held-out sets, before and after.</p></div>
+      <div style="margin-top:170px">
+        <h1 style="font-size:96px">Relay.</h1>
+        <p class="lead" style="margin-top:28px;font-size:46px;color:#d6dde4;max-width:1500px">From resident request to accountable resolution.</p>
+        <p style="margin-top:70px;font:500 34px 'IBM Plex Mono',monospace;color:#e8590c">github.com/elaineh16/yc-hackathon</p>
       </div>`,
-      `<span>Not deployed · Fiber shown in fixture mode (no key) · local 3B model on CPU</span><span class="mono">github.com/elaineh16/yc-hackathon</span>`,
+      `<span>Recorded from the running app: real chat with a local model, a live Fiber AI search, one shared case</span><span>Demo accounts are local and fictional</span>`,
     ),
   },
 ];

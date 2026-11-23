@@ -1,20 +1,28 @@
-# Browser journeys (Playwright, Chrome), 2026-11-23 05:37:54 EST
-$ cd app/e2e && npx playwright test journey --reporter=list
+﻿# Browser journeys (Playwright, Chrome), 2026-11-23 17:23:41 EST
+# Run with one retry, as in CI: a test that needed it is reported as flaky, never hidden.
+$ cd app/e2e && npx playwright test journey --reporter=list --retries=1
+
 Running 16 tests using 1 worker
-  ok  1 tests\journey.spec.ts:24:1 › 1-2. the resident reports a leaking kitchen sink and it is saved (13.3s)
-  ok  2 tests\journey.spec.ts:62:1 › 3-4. the manager sees the real case and assigns an approved plumber (11.6s)
-  ok  3 tests\journey.spec.ts:86:1 › 5-6. the contractor receives it and responds with an estimate and availability (8.2s)
-  ok  4 tests\journey.spec.ts:107:1 › the resident chooses a time; it waits for the manager's approval (4.9s)
-  ok  5 tests\journey.spec.ts:117:1 › 7-8. the manager approves; the visit is confirmed because everyone agreed (7.4s)
-  ok  6 tests\journey.spec.ts:129:1 › 9. the resident sees the confirmed visit and the timeline (4.6s)
-  ok  7 tests\journey.spec.ts:135:1 › 10. the contractor does the work and reports it complete (12.1s)
-  ok  8 tests\journey.spec.ts:155:1 › 11-12. the resident verifies and the case is RESOLVED with its full history (7.8s)
-  ok  9 tests\journeys.spec.ts:52:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation (22.5s)
-  ok 10 tests\journeys.spec.ts:124:3 › 2. a missing vendor: discovery, verification, onboarding, resume › no approved heating and cooling vendor: Relay finds local businesses and the manager onboards one (21.9s)
-  ok 11 tests\journeys.spec.ts:181:3 › 3. an ambiguous report: a person classifies it, then it routes › a vague report goes to a person, who sets the category; it then follows the trade's path (12.4s)
-  ok 12 tests\journeys.spec.ts:262:3 › 4. follow-up: completion is confirmed by the resident, and 'still having problems' reopens it › the contractor completes; the resident is asked in-app and by email; no reopens it for the manager (18.2s)
-  ok 13 tests\journeys.spec.ts:310:3 › 5. failures are visible and never block the work › a double-submitted report creates one case (2.7s)
-  ok 14 tests\journeys.spec.ts:328:3 › 5. failures are visible and never block the work › with the AI offline, the resident is told and the form works (1.3s)
-  ok 15 tests\journeys.spec.ts:337:3 › 5. failures are visible and never block the work › the discovery provider is down: the failure is explained and a vendor can be added by hand (17.2s)
-  ok 16 tests\journeys.spec.ts:379:3 › 5. failures are visible and never block the work › email not configured: the manager is told notifications are in-app only (5.0s)
-  16 passed (5.6m)
+
+(node:32108) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32108) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 tests\journey.spec.ts:24:1 › 1-2. the resident reports a leaking kitchen sink and it is saved (3.0s)
+  ok  2 tests\journey.spec.ts:62:1 › 3-4. the manager sees the real case and assigns an approved plumber (2.3s)
+  ok  3 tests\journey.spec.ts:86:1 › 5-6. the contractor receives it and responds with an estimate and availability (2.5s)
+  ok  4 tests\journey.spec.ts:107:1 › the resident chooses a time; it waits for the manager's approval (1.2s)
+  ok  5 tests\journey.spec.ts:117:1 › 7-8. the manager approves; the visit is confirmed because everyone agreed (1.8s)
+  ok  6 tests\journey.spec.ts:129:1 › 9. the resident sees the confirmed visit and the timeline (755ms)
+  ok  7 tests\journey.spec.ts:135:1 › 10. the contractor does the work and reports it complete (1.5s)
+  ok  8 tests\journey.spec.ts:155:1 › 11-12. the resident verifies and the case is RESOLVED with its full history (2.6s)
+  ok  9 tests\journeys.spec.ts:52:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation (8.1s)
+  ok 10 tests\journeys.spec.ts:124:3 › 2. a missing vendor: discovery, verification, onboarding, resume › no approved heating and cooling vendor: Relay finds local businesses and the manager onboards one (8.5s)
+  ok 11 tests\journeys.spec.ts:181:3 › 3. an ambiguous report: a person classifies it, then it routes › a vague report goes to a person, who sets the category; it then follows the trade's path (2.8s)
+  ok 12 tests\journeys.spec.ts:262:3 › 4. follow-up: completion is confirmed by the resident, and 'still having problems' reopens it › the contractor completes; the resident is asked in-app and by email; no reopens it for the manager (4.8s)
+  ok 13 tests\journeys.spec.ts:310:3 › 5. failures are visible and never block the work › a double-submitted report creates one case (2.0s)
+  ok 14 tests\journeys.spec.ts:328:3 › 5. failures are visible and never block the work › with the AI offline, the resident is told and the form works (857ms)
+  ok 15 tests\journeys.spec.ts:337:3 › 5. failures are visible and never block the work › the discovery provider is down: the failure is explained and a vendor can be added by hand (14.6s)
+  ok 16 tests\journeys.spec.ts:379:3 › 5. failures are visible and never block the work › email not configured: the manager is told notifications are in-app only (7.4s)
+
+  16 passed (2.6m)
