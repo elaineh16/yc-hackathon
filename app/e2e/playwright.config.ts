@@ -8,6 +8,9 @@ export default defineConfig({
   expect: { timeout: 45_000 },
   fullyParallel: false,
   workers: 1,
+  // In CI the app runs on the Vite dev server, which very occasionally serves a page that never renders. One retry,
+  // reported by Playwright as "flaky" (never hidden); locally there are no retries.
+  retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never", outputFolder: "report" }]],
   outputDir: "test-results",
   use: {

@@ -12,7 +12,15 @@ export async function signIn(browser: Browser, username: string, viewport = { wi
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
+  const field = page.getByLabel("Username");
+  try {
+    await field.waitFor({ timeout: 20_000 });
+  } catch {
+    // The Vite dev server occasionally serves a page that never renders (a dev-only "@vitejs/plugin-react can't
+    // detect preamble" error, seen once in CI). One reload recovers it; anything else still fails on the next line.
+    await page.reload();
+  }
+  await field.fill(username);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).not.toHaveURL(/\/login/);
