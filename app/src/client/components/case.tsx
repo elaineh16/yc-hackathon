@@ -1,12 +1,15 @@
 // Pieces every role's case view shares.
-import { ArrowRight, Bot, CircleAlert, Clock } from "lucide-react";
+import { ArrowRight, CircleAlert, Clock } from "lucide-react";
 import type { Role } from "../../shared/domain";
 import { MAIN_PATH } from "../../shared/machine";
 import type { CaseListItem, EventView } from "../../shared/views";
 import { actorLabel, categoryLabel, clock, dueIn, holderText, SEVERITY_TONE, STATUS_TONE, statusLabel, when } from "../lib";
 import { Badge, cn } from "../ui";
+import { eventKind, eventLabel, Provenance } from "./provenance";
 
-export const StatusBadge = ({ status }: { status: CaseListItem["status"] }) => <Badge tone={STATUS_TONE[status]}>{statusLabel(status)}</Badge>;
+/** Noise cases waiting at AWAITING_ASSIGNMENT need the manager, not a vendor: say so. */
+export const StatusBadge = ({ status, category }: { status: CaseListItem["status"]; category?: CaseListItem["category"] }) =>
+  category === "NOISE" && status === "AWAITING_ASSIGNMENT" ? <Badge tone="warn">To handle</Badge> : <Badge tone={STATUS_TONE[status]}>{statusLabel(status)}</Badge>;
 export const SeverityBadge = ({ severity }: { severity: CaseListItem["severity"] }) =>
   severity === "ROUTINE" ? <Badge tone="outline">Routine</Badge> : <Badge tone={SEVERITY_TONE[severity]}>{severity === "EMERGENCY" ? "Emergency" : "Urgent"}</Badge>;
 
@@ -14,20 +17,20 @@ export const SeverityBadge = ({ severity }: { severity: CaseListItem["severity"]
  * The product's core idea made visible: every case has a state, an owner, a next action.
  * When the viewer is the one the case is waiting on, it is marked in hi-vis orange.
  */
-export function NextActionBar({ c, viewer }: { c: Pick<CaseListItem, "status" | "holder" | "nextAction" | "nextActionDueAt" | "overdue">; viewer: Role }) {
+export function NextActionBar({ c, viewer }: { c: Pick<CaseListItem, "status" | "holder" | "nextAction" | "nextActionDueAt" | "overdue" | "category">; viewer: Role }) {
   const h = holderText(c.holder, viewer);
   const due = dueIn(c.nextActionDueAt);
   if (c.holder === "NONE") {
     return (
       <div className="flex items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 text-sm" data-testid="next-action">
-        <StatusBadge status={c.status} />
+        <StatusBadge status={c.status} category={c.category} />
         <span className="text-muted">{c.status === "RESOLVED" ? "This case is closed." : "This case was cancelled."}</span>
       </div>
     );
   }
   return (
     <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border px-4 py-3 text-sm", h.mine ? "border-move bg-move-soft" : "border-line bg-surface")} data-testid="next-action">
-      <StatusBadge status={c.status} />
+      <StatusBadge status={c.status} category={c.category} />
       <span className={cn("font-semibold", h.mine ? "text-[#a4400a]" : "text-ink")}>{h.text}</span>
       <span className="flex min-w-0 items-center gap-2 text-ink-2">
         <ArrowRight className="size-4 shrink-0 text-faint" aria-hidden />
@@ -56,10 +59,14 @@ export function CaseProgress({ status }: { status: CaseListItem["status"] }) {
   );
 }
 
-const DOT: Record<string, string> = { RESIDENT: "bg-[#6b7c8a]", MANAGER: "bg-ink", CONTRACTOR: "bg-info", SYSTEM: "bg-faint", AGENT: "bg-ai" };
+const DOT: Record<string, string> = { RESIDENT: "bg-who-resident", MANAGER: "bg-ink", CONTRACTOR: "bg-who-vendor", SYSTEM: "bg-who-system", AGENT: "bg-ai" };
 
-/** Chronological history. Each entry says who did what, when; AI entries are labelled as such. */
-export function Timeline({ events, compact }: { events: EventView[]; compact?: boolean }) {
+/**
+ * Chronological history. Each entry says who did what, when, and what kind of thing it was: an AI proposal is never
+ * shown like an executed action, and a vendor's or system's step is never shown like a person's confirmation.
+ * `provenance` adds the explicit chips (manager view); residents and contractors get the plain history.
+ */
+export function Timeline({ events, compact, provenance }: { events: EventView[]; compact?: boolean; provenance?: boolean }) {
   return (
     <ol className="relative space-y-4 before:absolute before:top-2 before:bottom-2 before:left-[5px] before:w-px before:bg-line" data-testid="timeline">
       {events.map((e) => (
@@ -67,12 +74,13 @@ export function Timeline({ events, compact }: { events: EventView[]; compact?: b
           <span className={cn("absolute top-1.5 left-0 size-[11px] rounded-full ring-4 ring-surface", DOT[e.actorRole] ?? "bg-faint")} aria-hidden />
           <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
             <span className="font-medium text-ink-2">{e.actorName}</span>
-            {e.actorRole === "AGENT" && (
-              <Badge tone="ai" className="px-1.5 py-0">
-                <Bot /> AI
-              </Badge>
+            {provenance ? (
+              <Provenance kind={eventKind(e)} label={eventLabel(e)} />
+            ) : e.actorRole === "AGENT" ? (
+              <Provenance kind="ai-action" label="Relay AI" />
+            ) : (
+              !compact && <span>{actorLabel(e.actorRole)}</span>
             )}
-            {!compact && e.actorRole !== "AGENT" && <span>{actorLabel(e.actorRole)}</span>}
             <time className="tnum" dateTime={e.at} title={new Date(e.at).toLocaleString()}>
               {when(e.at)} ({clock(e.at)})
             </time>
@@ -92,7 +100,7 @@ export function Timeline({ events, compact }: { events: EventView[]; compact?: b
 
 export const CaseMeta = ({ c }: { c: CaseListItem }) => (
   <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
-    <span className="tnum font-medium text-ink-2">{c.ref}</span>
+    <span className="font-mono text-[13px] font-medium text-ink-2">{c.ref}</span>
     <SeverityBadge severity={c.severity} />
     <Badge tone="outline">{categoryLabel(c.category)}</Badge>
     <span>

@@ -64,55 +64,70 @@ function Report({ me }: { me: Me }) {
   );
 }
 
+/** Real time since Relay started on the reply: a clock, not an animation. */
+function Elapsed({ since }: { since: string }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="font-mono tnum">{Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000))} s</span>;
+}
+
 function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text: string) => void }) {
   const navigate = useNavigate();
-  const { data: conv, refetch } = useQuery(getIntakeConversation, { unitId }, { enabled: !!unitId });
+  const [poll, setPoll] = useState(false);
+  // Follow one conversation by id, so a filed conversation keeps showing its result instead of a fresh greeting.
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  // While a reply is being produced (a background job), poll for it; the request that sent the message returned at once.
+  const { data: view, refetch } = useQuery(getIntakeConversation, { unitId, conversationId }, { enabled: !!unitId, refetchInterval: poll ? 1500 : false });
+  useEffect(() => {
+    if (view?.id && view.id !== conversationId) setConversationId(view.id);
+  }, [view?.id, conversationId]);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [live, setLive] = useState<typeof conv | null>(null);
-  const view = live ?? conv;
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    setPoll(!!view?.pending);
+  }, [view?.pending]);
+  useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [view?.messages.length, sending]);
+  }, [view?.messages.length, view?.pending]);
 
   async function send(e: FormEvent) {
     e.preventDefault();
     const message = text.trim();
-    if (!message || !view) return;
+    if (!message || !view || view.pending) return;
     setText("");
-    setSending(message);
+    setSending(true);
     setError(null);
     try {
-      const next = await sendIntakeMessage({ conversationId: view.id, text: message });
-      setLive(next);
+      await sendIntakeMessage({ conversationId: view.id, text: message });
+      setPoll(true);
+      await refetch();
     } catch (err) {
-      const code = (err as { data?: { code?: string } })?.data?.code;
-      if (code === "ai_unavailable") {
-        const words = [...(view.messages ?? []).filter((m) => m.role === "resident").map((m) => m.text), message].join("\n");
-        onUnavailable(words);
-        return;
-      }
       setError(errorText(err));
       setText(message);
     } finally {
-      setSending(null);
+      setSending(false);
     }
   }
   async function restart() {
-    setLive(await getIntakeConversation({ unitId, fresh: true }));
-    void refetch();
+    const fresh = await getIntakeConversation({ unitId, fresh: true });
+    setConversationId(fresh.id);
   }
   if (!view) return <Spinner />;
   const done = view.status === "SUBMITTED";
+  const offline = view.lastError === "ai_unavailable" && !view.pending && !done;
+  const words = view.messages.filter((m) => m.role === "resident").map((m) => m.text).join("\n");
   return (
     <Panel className="flex flex-col">
       <div className="flex items-center justify-between border-b border-line px-4 py-2.5 text-sm">
         <span className="flex items-center gap-2 font-medium">
           <Bot className="size-4 text-ai" /> Relay <Badge tone="ai">AI assistant</Badge>
         </span>
-        <Button size="sm" variant="ghost" onClick={restart}>
+        <Button size="sm" variant="ghost" onClick={restart} disabled={view.pending}>
           Start over
         </Button>
       </div>
@@ -122,23 +137,30 @@ function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text:
             {m.text}
           </div>
         ))}
-        {sending && (
-          <>
-            <div className="ml-auto max-w-[85%] rounded-lg bg-ink px-3 py-2 text-[15px] text-white opacity-70">{sending}</div>
-            <div className="flex items-center gap-2 text-sm text-muted">
-              <Spinner /> Relay is thinking. On this local model it can take up to a minute.
-            </div>
-          </>
+        {view.pending && view.pendingSince && (
+          <p className="flex items-center gap-2 text-sm text-muted" data-testid="chat-pending">
+            <Bot className="size-4 text-ai" /> Message saved. Relay is writing a reply (<Elapsed since={view.pendingSince} />). On this local model it can take up to a minute.
+          </p>
         )}
         <div ref={end} />
       </div>
       {error && <Notice tone="danger" className="mx-4 mb-3">{error}</Notice>}
+      {offline && (
+        <Notice tone="warn" className="mx-4 mb-3" title="Relay's assistant is offline">
+          Your messages are saved. The form works without the assistant.
+          <span className="mt-2 block">
+            <Button size="sm" onClick={() => onUnavailable(words)}>
+              Use the form with my words
+            </Button>
+          </span>
+        </Notice>
+      )}
       {done ? (
         <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
           <Notice tone="ok" className="flex-1">
-            Filed as {view.caseRef}.
+            {view.filed.length > 1 ? `Filed as ${view.filed.map((f) => f.ref).join(" and ")}.` : view.filed[0]?.action === "reopened" ? `Reopened ${view.filed[0].ref}.` : `Filed as ${view.caseRef ?? view.filed[0]?.ref}.`}
           </Notice>
-          {view.caseId && <Button onClick={() => navigate(`/my/cases/${view.caseId}`)}>Follow this request</Button>}
+          {(view.caseId || view.filed[0]?.caseId) && <Button onClick={() => navigate(`/my/cases/${view.caseId ?? view.filed[0].caseId}`)}>Follow this request</Button>}
         </div>
       ) : (
         <form onSubmit={send} className="flex gap-2 border-t border-line p-3">
@@ -150,11 +172,11 @@ function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text:
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) send(e as unknown as FormEvent);
             }}
-            placeholder="Describe the problem"
+            placeholder={view.pending ? "Relay is replying…" : "Describe the problem"}
             aria-label="Message to Relay"
-            disabled={!!sending}
+            disabled={sending || view.pending}
           />
-          <Button type="submit" size="icon" aria-label="Send" disabled={!text.trim() || !!sending}>
+          <Button type="submit" size="icon" aria-label="Send" disabled={!text.trim() || sending || view.pending}>
             <Send />
           </Button>
         </form>

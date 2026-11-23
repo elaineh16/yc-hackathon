@@ -5,6 +5,7 @@
    Status colours carry meaning and are never decoration. */
 @theme {
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --color-paper: #f4f5f3;
   --color-surface: #ffffff;
@@ -29,6 +30,14 @@
   --color-ok-soft: #e7f4ea;
   --color-ai: #3a4a8c;
   --color-ai-soft: #eef0f8;
+  /* The sidebar: a deep ink, a hair lighter for hover, and a quiet line. */
+  --color-night: #10171f;
+  --color-night-2: #1a232d;
+  --color-night-line: #26313c;
+  /* Provenance: who or what did something. Each has a dot colour; text stays ink. */
+  --color-who-resident: #5f7d8c;
+  --color-who-vendor: #1d5fa6;
+  --color-who-system: #7b8794;
 
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
@@ -52,6 +61,15 @@
 
 @utility tnum {
   font-variant-numeric: tabular-nums;
+}
+/* Small uppercase section labels, as in a dense ops tool. */
+@utility eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--color-faint);
 }
 
 @media (prefers-reduced-motion: reduce) {

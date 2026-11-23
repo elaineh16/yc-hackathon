@@ -1,4 +1,7 @@
-import { ArrowLeft, Bot, CalendarCheck, CheckCircle2, ChevronDown, CircleAlert, RefreshCw, ShieldAlert, Sparkles, Wrench } from "lucide-react";
+// The case workspace (managers): the resident's words and Relay's reading, the state and who holds it, what the AI
+// proposed and what actually ran, vendors and discovery, approvals, the visit, every follow-up and its delivery, and
+// the full history. Proposals, executions, acceptances, confirmations, waiting and failures are always told apart.
+import { ArrowLeft, Bot, CalendarCheck, CheckCircle2, ChevronDown, CircleAlert, HandCoins, Plus, RefreshCw, Search, ShieldAlert, Sparkles, Wrench } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -7,6 +10,7 @@ import {
   cancelCase,
   cancelVisit,
   closeUnverified,
+  decideBudgetRequest,
   decideSpend,
   decideSuggestion,
   escalateCase,
@@ -17,12 +21,16 @@ import {
   reopenCase,
   resumeCase,
   reviewTriage,
+  saveVendor,
   useQuery,
   withdrawOffer,
 } from "wasp/client/operations";
-import { CATEGORIES, type Category, CATEGORY_SHORT, SEVERITIES, type Severity } from "../../../shared/domain";
+import { CATEGORIES, type Category, CATEGORY_SHORT, isTrade, SEVERITIES, type Severity, TRADE_NOUN } from "../../../shared/domain";
 import type { AiProposalView, CaseDetail } from "../../../shared/views";
 import { CaseMeta, CaseProgress, NextActionBar, Timeline } from "../../components/case";
+import { DiscoveryPanel } from "../../components/discovery";
+import { FollowUpsPanel } from "../../components/followups";
+import { Provenance } from "../../components/provenance";
 import { Shell } from "../../components/shell";
 import { IssuePanel } from "../../components/story";
 import { dayTime, money, toCents, useAction, when } from "../../lib";
@@ -59,20 +67,25 @@ function Detail({ caseId }: { caseId: string }) {
       </div>
       <NextActionBar c={c} viewer="MANAGER" />
       <CaseProgress status={c.status} />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="min-w-0 space-y-5">
+      {/* One action panel, placed by the grid: first on a phone (before the long story), top of the side column on a desktop. */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_25rem] lg:grid-rows-[auto_1fr]">
+        <div className="lg:col-start-2 lg:row-start-1">
+          <ActionPanel c={c} />
+        </div>
+        <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           <IssuePanel c={c} />
+          {isTrade(c.category) && <DiscoveryPanel caseId={c.id} />}
           <AiPanel c={c} />
           <Panel>
-            <PanelHeader title="History">Everything that happened on this case, in order.</PanelHeader>
+            <PanelHeader title="History">Everything that happened on this case, in order, labelled by who or what did it.</PanelHeader>
             <div className="p-4">
-              <Timeline events={c.events} />
+              <Timeline events={c.events} provenance />
             </div>
           </Panel>
         </div>
-        <aside className="space-y-5 lg:sticky lg:top-6 lg:self-start">
-          <ActionPanel c={c} />
+        <aside className="space-y-5 lg:col-start-2 lg:row-start-2 lg:self-start">
           <VendorPanel c={c} />
+          {c.followUps && <FollowUpsPanel items={c.followUps} />}
         </aside>
       </div>
     </div>
@@ -85,6 +98,8 @@ function ActionPanel({ c }: { c: CaseDetail }) {
   const err = a.error && <Notice tone="danger">{a.error}</Notice>;
   if (c.can.reviewTriage && c.status === "TRIAGED") return <ReviewTriage c={c} />;
   if (c.status === "ESCALATED") return <Escalated c={c} />;
+  if (c.can.decideBudgetRequest) return <BudgetDecision c={c} />;
+  if (c.category === "NOISE" && c.can.handleDirectly) return <HandleDirectly c={c} title="Handle it directly" intro="Noise and neighbour matters are handled by management, not by a vendor. Record what you did; the resident confirms whether it is sorted." />;
   if (c.can.assignVendor) return <AssignVendor c={c} />;
   if (c.can.decideSpend && c.assignment?.approval) return <DecideSpend c={c} />;
   if (c.status === "AWAITING_VENDOR" && c.assignment) {
@@ -95,6 +110,9 @@ function ActionPanel({ c }: { c: CaseDetail }) {
         </PanelHeader>
         <div className="space-y-3 p-4">
           {err}
+          <p className="flex items-center gap-2 text-sm">
+            <Provenance kind="waiting" label="Waiting on the vendor" />
+          </p>
           <p className="text-sm text-muted">If they do not respond in time the offer expires automatically and the case comes back to you.</p>
           <Button variant="outline" busy={a.busy === "withdraw"} onClick={() => a.run("withdraw", () => withdrawOffer({ caseId: c.id, reason: "Withdrawn by the manager" }))}>
             Withdraw offer
@@ -110,8 +128,8 @@ function ActionPanel({ c }: { c: CaseDetail }) {
         <PanelHeader title="Waiting for the resident">Only the resident can confirm the problem is fixed.</PanelHeader>
         <div className="space-y-3 p-4 text-sm">
           {err}
-          <p>
-            Asked {when(c.verification.requestedAt)}. Reminders sent: {c.verification.reminders}.
+          <p className="flex flex-wrap items-center gap-2">
+            <Provenance kind="waiting" label="Waiting on the resident" /> Asked {when(c.verification.requestedAt)}. Reminders sent: {c.verification.reminders}.
           </p>
           {c.can.closeUnverified ? (
             <Button variant="outline" busy={a.busy === "close"} onClick={() => a.run("close", () => closeUnverified({ caseId: c.id, note: "No response from the resident" }))}>
@@ -148,38 +166,60 @@ function ReviewTriage({ c }: { c: CaseDetail }) {
   const [severity, setSeverity] = useState<Severity>(c.severity);
   const [note, setNote] = useState("");
   return (
-    <Panel className="border-move">
-      <PanelHeader title="Review the report">Relay could not route this on its own. Set the category and severity.</PanelHeader>
+    <div className="space-y-5">
+      <Panel className="border-move">
+        <PanelHeader title="Review the report">Relay did not route this on its own. Set the category and severity.</PanelHeader>
+        <div className="space-y-3 p-4">
+          {a.error && <Notice tone="danger">{a.error}</Notice>}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="cat">Category</Label>
+              <Select id="cat" value={category} onChange={(e) => setCategory(e.target.value as Category)}>
+                {CATEGORIES.map((k) => (
+                  <option key={k} value={k}>
+                    {CATEGORY_SHORT[k]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="sev">Severity</Label>
+              <Select id="sev" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
+                {SEVERITIES.map((k) => (
+                  <option key={k} value={k}>
+                    {k.charAt(0) + k.slice(1).toLowerCase()}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="note">Note (optional)</Label>
+            <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why this classification" />
+          </div>
+          <Button variant="move" className="w-full" busy={a.busy === "review"} onClick={() => a.run("review", () => reviewTriage({ caseId: c.id, category, severity, note }))}>
+            {severity === "EMERGENCY" ? "Escalate as an emergency" : category === "NOISE" ? "Save: handle it directly" : "Save and route for a vendor"}
+          </Button>
+        </div>
+      </Panel>
+      {c.can.handleDirectly && (
+        <HandleDirectly c={c} title="Or handle it directly" intro={c.category === "ACCESS" ? "Lockouts: check the person's identity against the lease before anyone is let in. Never share a door or lockbox code." : "If you dealt with it yourself, record what you did; the resident confirms whether it is sorted."} />
+      )}
+    </div>
+  );
+}
+
+function HandleDirectly({ c, title, intro }: { c: CaseDetail; title: string; intro: string }) {
+  const a = useAction();
+  const [note, setNote] = useState("");
+  return (
+    <Panel className={c.category === "NOISE" ? "border-move" : undefined}>
+      <PanelHeader title={title}>{intro}</PanelHeader>
       <div className="space-y-3 p-4">
         {a.error && <Notice tone="danger">{a.error}</Notice>}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="cat">Category</Label>
-            <Select id="cat" value={category} onChange={(e) => setCategory(e.target.value as Category)}>
-              {CATEGORIES.map((k) => (
-                <option key={k} value={k}>
-                  {CATEGORY_SHORT[k]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="sev">Severity</Label>
-            <Select id="sev" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
-              {SEVERITIES.map((k) => (
-                <option key={k} value={k}>
-                  {k.charAt(0) + k.slice(1).toLowerCase()}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="note">Note (optional)</Label>
-          <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why this classification" />
-        </div>
-        <Button variant="move" className="w-full" busy={a.busy === "review"} onClick={() => a.run("review", () => reviewTriage({ caseId: c.id, category, severity, note }))}>
-          {severity === "EMERGENCY" ? "Escalate as an emergency" : "Save and route for a vendor"}
+        <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={c.category === "ACCESS" ? "For example: identity checked against the lease, let in by the superintendent at 7:40 pm." : "For example: spoke with the upstairs tenant about quiet hours."} aria-label="What was done" />
+        <Button className="w-full" disabled={note.trim().length < 3} busy={a.busy === "h"} onClick={() => a.run("h", () => markHandledOutside({ caseId: c.id, note }))}>
+          Record it and ask the resident to confirm
         </Button>
       </div>
     </Panel>
@@ -193,13 +233,25 @@ function AssignVendor({ c }: { c: CaseDetail }) {
   const [note, setNote] = useState("");
   const a = useAction();
   const chosen = vendorId || vendors?.find((v) => v.name === suggestion?.vendorName)?.id || "";
+  const noun = isTrade(c.category) ? TRADE_NOUN[c.category] : "vendor";
   return (
     <Panel className="border-move">
-      <PanelHeader title={c.status === "REOPENED" ? "Assign a vendor again" : "Assign a vendor"}>Approved vendors for {CATEGORY_SHORT[c.category].toLowerCase()} work.</PanelHeader>
+      <PanelHeader title={c.status === "REOPENED" ? "Assign a vendor again" : "Assign a vendor"}>Vendors approved at this property for {CATEGORY_SHORT[c.category].toLowerCase()} work.</PanelHeader>
       <div className="space-y-3 p-4">
         {a.error && <Notice tone="danger">{a.error}</Notice>}
         {isLoading && <Spinner />}
-        {vendors && vendors.length === 0 && <Notice tone="warn">No approved vendor covers this trade. Add one in Settings.</Notice>}
+        {vendors && vendors.length === 0 && (
+          <Notice tone="warn" title={`No approved ${noun} for this property`}>
+            <span className="mt-1 flex flex-wrap gap-2">
+              {c.can.searchVendors && (
+                <a href="#discovery" className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-sunk">
+                  <Search className="size-3.5" /> See vendor discovery
+                </a>
+              )}
+              <AddVendorDialog c={c} />
+            </span>
+          </Notice>
+        )}
         <fieldset className="space-y-2">
           <legend className="sr-only">Vendor</legend>
           {vendors?.map((v) => (
@@ -208,11 +260,7 @@ function AssignVendor({ c }: { c: CaseDetail }) {
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2 font-medium">
                   {v.name}
-                  {suggestion?.vendorName === v.name && (
-                    <Badge tone="ai">
-                      <Sparkles /> Relay suggests
-                    </Badge>
-                  )}
+                  {suggestion?.vendorName === v.name && <Provenance kind="ai-proposal" label="Relay suggests" />}
                 </span>
                 <span className="mt-0.5 block text-xs text-muted">
                   {v.openJobs} open job{v.openJobs === 1 ? "" : "s"}
@@ -224,15 +272,58 @@ function AssignVendor({ c }: { c: CaseDetail }) {
             </label>
           ))}
         </fieldset>
-        <div>
-          <Label htmlFor="vnote">Note to the vendor (optional)</Label>
-          <Input id="vnote" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Access, timing, anything they should know" />
-        </div>
-        <Button variant="move" className="w-full" disabled={!chosen} busy={a.busy === "assign"} onClick={() => a.run("assign", () => assignVendor({ caseId: c.id, vendorId: chosen, note }))}>
-          <Wrench /> Send the job offer
-        </Button>
+        {vendors && vendors.length > 0 && (
+          <>
+            <div>
+              <Label htmlFor="vnote">Note to the vendor (optional)</Label>
+              <Input id="vnote" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Access, timing, anything they should know" />
+            </div>
+            <Button variant="move" className="w-full" disabled={!chosen} busy={a.busy === "assign"} onClick={() => a.run("assign", () => assignVendor({ caseId: c.id, vendorId: chosen, note }))}>
+              <Wrench /> Send the job offer
+            </Button>
+          </>
+        )}
       </div>
     </Panel>
+  );
+}
+
+/** Managers can always add a vendor they trust by hand: discovery is optional and never blocks a case. */
+function AddVendorDialog({ c }: { c: CaseDetail }) {
+  const a = useAction();
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ name: "", phone: "", email: "" });
+  if (!isTrade(c.category)) return null;
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-sunk">
+          <Plus className="size-3.5" /> Add a vendor you trust
+        </button>
+      </DialogTrigger>
+      <DialogContent title={`Add ${TRADE_NOUN[c.category as keyof typeof TRADE_NOUN]}`} description={`It is approved for ${CATEGORY_SHORT[c.category].toLowerCase()} work at ${c.propertyName}. You can then offer it this job.`}>
+        <div className="space-y-3">
+          {a.error && <Notice tone="danger">{a.error}</Notice>}
+          <div>
+            <Label htmlFor="avn">Name</Label>
+            <Input id="avn" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="avp">Phone</Label>
+              <Input id="avp" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+            </div>
+            <div>
+              <Label htmlFor="ave">Email</Label>
+              <Input id="ave" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+            </div>
+          </div>
+          <Button disabled={f.name.trim().length < 2} busy={a.busy === "add"} onClick={async () => (await a.run("add", () => saveVendor({ name: f.name, phone: f.phone, email: f.email, trades: [c.category] }))) && setOpen(false)}>
+            Add and approve
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -260,7 +351,7 @@ function DecideSpend({ c }: { c: CaseDetail }) {
         <div>
           <Label htmlFor="cap">Approve up to (CAD)</Label>
           <Input id="cap" inputMode="decimal" value={cap} onChange={(e) => setCap(e.target.value)} placeholder="350" />
-          <Hint>The vendor is told this maximum. A final cost above it is flagged for you.</Hint>
+          <Hint>The vendor is told this maximum. A final cost above it is flagged for you. Relay's AI can never approve spending.</Hint>
         </div>
         <div>
           <Label htmlFor="dnote">Note (optional)</Label>
@@ -275,6 +366,35 @@ function DecideSpend({ c }: { c: CaseDetail }) {
           </Button>
         </div>
         {asg.slots.some((s) => s.status === "ACCEPTED") && <Notice tone="info">The resident has already chosen a visit time. Approving confirms it.</Notice>}
+      </div>
+    </Panel>
+  );
+}
+
+function BudgetDecision({ c }: { c: CaseDetail }) {
+  const asg = c.assignment!;
+  const cr = asg.changeRequest!;
+  const cap = asg.approval?.capCents ?? asg.approval?.amountCents ?? 0;
+  const a = useAction();
+  const [note, setNote] = useState("");
+  return (
+    <Panel className="border-move">
+      <PanelHeader title={<span className="flex items-center gap-2"><HandCoins className="size-4 text-[#b8460a]" /> More money requested</span>}>
+        {asg.vendorName} asks for <strong className="text-ink">{money(cr.cents)}</strong> more than the approved {money(cap)} (new total {money(cap + cr.cents)}).
+      </PanelHeader>
+      <div className="space-y-3 p-4">
+        {a.error && <Notice tone="danger">{a.error}</Notice>}
+        <p className="rounded-md bg-sunk px-3 py-2 text-sm">“{cr.reason}”</p>
+        <p className="text-xs text-muted">Only you can decide. Nothing above {money(cap)} is authorised until you do. Relay's AI can summarise this but never approve it.</p>
+        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note to the vendor (optional)" aria-label="Note to the vendor" />
+        <div className="flex gap-2">
+          <Button variant="move" className="flex-1" busy={a.busy === "y"} onClick={() => a.run("y", () => decideBudgetRequest({ caseId: c.id, approve: true, note }))}>
+            <CheckCircle2 /> Approve {money(cr.cents)} more
+          </Button>
+          <Button variant="danger-outline" busy={a.busy === "n"} onClick={() => a.run("n", () => decideBudgetRequest({ caseId: c.id, approve: false, note }))}>
+            Decline
+          </Button>
+        </div>
       </div>
     </Panel>
   );
@@ -326,7 +446,10 @@ function CaseMenu({ c }: { c: CaseDetail }) {
   if (!c.can.escalate && !c.can.cancel && !c.can.cancelAppointment) return null;
   const go = async (kind: "escalate" | "cancel" | "visit") => {
     const done = await a.run(kind, () => (kind === "escalate" ? escalateCase({ caseId: c.id, reason }) : kind === "cancel" ? cancelCase({ caseId: c.id, reason }) : cancelVisit({ caseId: c.id, reason })));
-    if (done) (setOpen(null), setReason(""));
+    if (done) {
+      setOpen(null);
+      setReason("");
+    }
   };
   const dialog = (kind: "escalate" | "cancel" | "visit", label: string, title: string, desc: string, variant: "danger-outline" | "outline") => (
     <Dialog open={open === kind} onOpenChange={(o) => setOpen(o ? kind : null)}>
@@ -355,10 +478,11 @@ function CaseMenu({ c }: { c: CaseDetail }) {
   );
 }
 
-// ───────── vendor, estimate and visit ─────────
+// ───────── vendor, estimate, budget and visit ─────────
 function VendorPanel({ c }: { c: CaseDetail }) {
   const asg = c.assignment;
   if (!asg && c.previousAssignments.length === 0) return null;
+  const accepted = asg && (asg.status === "ACCEPTED" || asg.status === "COMPLETED");
   return (
     <Panel>
       <PanelHeader title="Vendor and visit" />
@@ -367,7 +491,10 @@ function VendorPanel({ c }: { c: CaseDetail }) {
           <div className="space-y-2">
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{asg.vendorName}</span>
-              <Badge tone={asg.status === "ACCEPTED" || asg.status === "COMPLETED" ? "ok" : asg.status === "OFFERED" ? "info" : "outline"}>{asg.status.toLowerCase()}</Badge>
+              {asg.status === "OFFERED" && <Provenance kind="waiting" label="Offer sent, no answer yet" />}
+              {asg.status === "ACCEPTED" && <Provenance kind="vendor" label="Vendor accepted" />}
+              {asg.status === "COMPLETED" && <Provenance kind="vendor" label="Vendor says the work is done" />}
+              {!["OFFERED", "ACCEPTED", "COMPLETED"].includes(asg.status) && <Badge tone="outline">{asg.status.toLowerCase()}</Badge>}
             </p>
             {asg.estimateType && (
               <p>
@@ -375,9 +502,15 @@ function VendorPanel({ c }: { c: CaseDetail }) {
                 {asg.approval && (
                   <span className="text-muted">
                     {" "}
-                    {asg.approval.status === "AUTO_APPROVED" ? "approved by policy" : asg.approval.status === "APPROVED" ? `approved up to ${money(asg.approval.capCents)}` : asg.approval.status.toLowerCase()}
+                    {asg.approval.status === "AUTO_APPROVED" ? "approved by policy (under the threshold)" : asg.approval.status === "APPROVED" ? `approved by a manager up to ${money(asg.approval.capCents)}` : asg.approval.status.toLowerCase()}
                   </span>
                 )}
+              </p>
+            )}
+            {asg.changeRequest && (
+              <p className="text-xs">
+                <span className="text-muted">Budget request: </span>
+                {money(asg.changeRequest.cents)} more, <Badge tone={asg.changeRequest.status === "APPROVED" ? "ok" : asg.changeRequest.status === "REJECTED" ? "outline" : "move"}>{asg.changeRequest.status.toLowerCase()}</Badge>
               </p>
             )}
             {c.appointment ? (
@@ -385,6 +518,7 @@ function VendorPanel({ c }: { c: CaseDetail }) {
                 <CalendarCheck className="size-4" /> {c.appointment.label}
               </p>
             ) : (
+              accepted &&
               asg.slots.length > 0 && (
                 <ul className="space-y-1">
                   {asg.slots.map((s) => (
@@ -396,12 +530,17 @@ function VendorPanel({ c }: { c: CaseDetail }) {
                 </ul>
               )
             )}
-            {asg.completionNotes && <p className="rounded-md bg-sunk px-3 py-2">Completion: {asg.completionNotes}{asg.finalCostCents !== null ? ` (final ${money(asg.finalCostCents)})` : ""}</p>}
+            {asg.completionNotes && (
+              <p className="rounded-md bg-sunk px-3 py-2">
+                Completion: {asg.completionNotes}
+                {asg.finalCostCents !== null ? ` (final ${money(asg.finalCostCents)})` : ""}
+              </p>
+            )}
           </div>
         )}
         {c.previousAssignments.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted">Earlier offers</p>
+            <p className="eyebrow">Earlier offers</p>
             <ul className="mt-1 space-y-1 text-xs">
               {c.previousAssignments.map((p) => (
                 <li key={p.id}>
@@ -418,6 +557,15 @@ function VendorPanel({ c }: { c: CaseDetail }) {
 }
 
 // ───────── Relay AI ─────────
+const OUTCOME: Record<AiProposalView["status"], { kind: Parameters<typeof Provenance>[0]["kind"]; label: string }> = {
+  PENDING: { kind: "ai-proposal", label: "AI proposal, waiting for you" },
+  ACCEPTED: { kind: "manager", label: "Accepted" },
+  EXECUTED: { kind: "system", label: "Carried out" },
+  REJECTED: { kind: "skipped", label: "Rejected by a manager" },
+  FAILED: { kind: "failed", label: "Could not be carried out" },
+  SUPERSEDED: { kind: "skipped", label: "Replaced by a newer one" },
+};
+
 function AiPanel({ c }: { c: CaseDetail }) {
   const ai = c.ai;
   const { data: status } = useQuery(getAiStatus, undefined, { refetchInterval: 30000 });
@@ -437,59 +585,66 @@ function AiPanel({ c }: { c: CaseDetail }) {
         action={
           c.status !== "RESOLVED" &&
           c.status !== "CANCELLED" && (
-            <Button size="sm" variant="ghost" busy={a.busy === "again" || ai.pending} onClick={() => a.run("again", () => askRelayToReassess({ caseId: c.id }))}>
-              {!ai.pending && <RefreshCw />} {ai.pending ? "Reviewing…" : "Review again"}
+            <Button size="sm" variant="ghost" disabled={ai.pending} busy={a.busy === "again"} onClick={() => a.run("again", () => askRelayToReassess({ caseId: c.id }))}>
+              <RefreshCw /> {ai.pending ? "Review queued" : "Review again"}
             </Button>
           )
         }
       >
-        {status ? (status.available ? `Model: ${status.model}. Proposals follow this property's policy.` : `Unavailable: ${status.reason}`) : null}
+        {status ? (status.available ? `Model: ${status.model}. It proposes; this property's policy decides what may run.` : `Unavailable: ${status.reason} The case continues manually.`) : null}
       </PanelHeader>
       <div className="space-y-4 p-4">
         {a.error && <Notice tone="danger">{a.error}</Notice>}
         {ai.assessment ? (
           <div>
-            <p className="text-xs text-muted">Assessment, {when(ai.assessedAt)}</p>
-            <p className="mt-1 text-sm">{ai.assessment}</p>
+            <p className="flex items-center gap-2 text-xs text-muted">
+              <Provenance kind="ai-proposal" label="AI assessment" /> {when(ai.assessedAt)}
+            </p>
+            <p className="mt-1.5 text-sm">{ai.assessment}</p>
           </div>
         ) : (
-          <p className="text-sm text-muted">{ai.pending ? "Relay is reviewing this case." : "No assessment yet."}</p>
+          <p className="text-sm text-muted">{ai.pending ? "A review is queued or running for this case." : "No assessment yet."}</p>
         )}
         {pending.map((p) => (
           <Suggestion key={p.id} p={p} />
         ))}
         {past.length > 0 && (
-          <ul className="space-y-1.5 text-xs text-muted">
-            {past.slice(0, 4).map((p) => (
-              <li key={p.id}>
-                <span className="font-medium text-ink-2">{p.summary}</span>: {p.status.toLowerCase()}
-                {p.outcome ? `, ${p.outcome}` : ""}
-              </li>
-            ))}
-          </ul>
+          <div>
+            <p className="eyebrow">Earlier proposals</p>
+            <ul className="mt-1.5 space-y-1.5 text-xs">
+              {past.slice(0, 6).map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center gap-2">
+                  <Provenance kind={OUTCOME[p.status].kind} label={OUTCOME[p.status].label} />
+                  <span className="font-medium text-ink-2">{p.summary}</span>
+                  {p.outcome && <span className="text-muted">{p.outcome}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {ai.runs.length > 0 && (
           <div>
             <button className="flex items-center gap-1 text-xs font-medium text-muted hover:text-ink" onClick={() => setShowRuns(!showRuns)} aria-expanded={showRuns}>
-              <ChevronDown className={cn("size-3.5 transition-transform", showRuns && "rotate-180")} /> What Relay did ({ai.runs.length} review{ai.runs.length === 1 ? "" : "s"})
+              <ChevronDown className={cn("size-3.5 transition-transform", showRuns && "rotate-180")} /> What Relay did ({ai.runs.length} review{ai.runs.length === 1 ? "" : "s"}, every tool call as recorded)
             </button>
             {showRuns && (
               <ol className="mt-2 space-y-3">
                 {ai.runs.map((r) => (
                   <li key={r.id} className="rounded-md border border-line p-3 text-xs">
                     <p className="flex flex-wrap items-center gap-2">
-                      <Badge tone={r.status === "SUCCEEDED" ? "ok" : r.status === "RUNNING" ? "info" : "warn"}>{r.status.toLowerCase()}</Badge>
+                      <Provenance kind={r.status === "SUCCEEDED" ? "ai-action" : r.status === "RUNNING" ? "waiting" : r.status === "SKIPPED" ? "skipped" : "failed"} label={r.status.toLowerCase()} />
                       <span className="font-medium">{r.kind === "INTAKE" ? "Intake conversation" : `After: ${r.trigger.toLowerCase().replace(/_/g, " ")}`}</span>
                       <span className="text-muted">
                         {when(r.createdAt)}
-                        {r.durationMs ? `, ${Math.round(r.durationMs / 1000)} s` : ""}, {r.model}
+                        {r.durationMs ? `, ${Math.round(r.durationMs / 1000)} s` : ""}, <span className="font-mono">{r.model}</span>
                       </span>
                     </p>
                     {r.error && <p className="mt-1 text-warn">{r.error}</p>}
-                    <ol className="mt-2 list-decimal space-y-0.5 pl-5">
+                    <ol className="mt-2 space-y-1">
                       {r.steps.map((s, i) => (
-                        <li key={i} className={s.ok ? "" : "text-warn"}>
-                          {s.summary}
+                        <li key={i} className={cn("flex gap-2", !s.ok && "text-warn")}>
+                          <span className="w-40 shrink-0 truncate font-mono text-[11px] text-faint">{s.tool}</span>
+                          <span>{s.summary}</span>
                         </li>
                       ))}
                     </ol>
@@ -509,18 +664,24 @@ function Suggestion({ p }: { p: AiProposalView }) {
   const [text, setText] = useState(p.message ?? "");
   return (
     <div className="rounded-md border border-[#d5daf0] bg-ai-soft p-3" data-testid="ai-suggestion">
-      <p className="flex items-center gap-2 text-sm font-medium text-ai">
+      <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ai">
+        <Provenance kind="ai-proposal" label="AI proposal, not done yet" />
         <Sparkles className="size-4" /> {p.summary}
       </p>
       <p className="mt-1 text-sm text-ink-2">{p.rationale}</p>
-      {p.kind === "MESSAGE_RESIDENT" && <Textarea className="mt-2 bg-surface" value={text} onChange={(e) => setText(e.target.value)} aria-label="Message to the resident" />}
+      {p.kind === "MESSAGE_RESIDENT" && (
+        <>
+          <Textarea className="mt-2 bg-surface" value={text} onChange={(e) => setText(e.target.value)} aria-label="Message to the resident" />
+          <p className="mt-1 text-[11px] text-muted">Drafted by Relay AI and checked against the case facts. It is sent only if you approve it, and recorded as approved by you.</p>
+        </>
+      )}
       <p className="mt-2 flex items-start gap-1.5 text-xs text-muted">
         <CircleAlert className="mt-0.5 size-3.5 shrink-0" /> {p.policyNote}
       </p>
       {a.error && <Notice tone="danger" className="mt-2">{a.error}</Notice>}
       <div className="mt-3 flex gap-2">
         <Button size="sm" busy={a.busy === "yes"} onClick={() => a.run("yes", () => decideSuggestion({ proposalId: p.id, accept: true, message: p.kind === "MESSAGE_RESIDENT" ? text : undefined }))}>
-          {p.kind === "ASSIGN_VENDOR" ? "Send this offer" : p.kind === "ESCALATE" ? "Escalate" : "Send message"}
+          {p.kind === "ASSIGN_VENDOR" ? "Send this offer" : p.kind === "ESCALATE" ? "Escalate" : "Approve and send"}
         </Button>
         <Button size="sm" variant="outline" busy={a.busy === "no"} onClick={() => a.run("no", () => decideSuggestion({ proposalId: p.id, accept: false }))}>
           Dismiss

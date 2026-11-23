@@ -48,6 +48,53 @@ export function IssuePanel({ c }: { c: CaseDetail }) {
             )}
           </div>
         )}
+        {(c.observations.length > 0 || c.assumptions.length > 0 || c.openQuestions.length > 0) && (
+          <div className="grid gap-3 sm:grid-cols-3" data-testid="reading">
+            {c.observations.length > 0 && (
+              <div>
+                <p className="eyebrow">The resident reported</p>
+                <ul className="mt-1 space-y-0.5 text-sm">
+                  {c.observations.map((o, i) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {c.assumptions.length > 0 && (
+              <div>
+                <p className="eyebrow">Relay assumed (not confirmed)</p>
+                <ul className="mt-1 space-y-0.5 text-sm text-ink-2 italic">
+                  {c.assumptions.map((o, i) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {c.openQuestions.length > 0 && (
+              <div>
+                <p className="eyebrow">Still unknown</p>
+                <ul className="mt-1 space-y-0.5 text-sm text-warn">
+                  {c.openQuestions.map((o, i) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        {c.related.length > 0 && (
+          <p className="text-xs text-muted">
+            Filed in the same report:{" "}
+            {c.related.map((r, i) => (
+              <span key={r.id}>
+                {i > 0 && ", "}
+                <a className="underline underline-offset-2 hover:text-ink" href={c.viewerRole === "MANAGER" ? `/ops/cases/${r.id}` : `/my/cases/${r.id}`}>
+                  {r.ref} {r.title}
+                </a>
+              </span>
+            ))}
+          </p>
+        )}
         {c.answers.length > 0 && (
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
             {c.answers.map((a) => (

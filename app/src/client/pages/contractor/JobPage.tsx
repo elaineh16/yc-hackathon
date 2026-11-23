@@ -1,7 +1,7 @@
 import { ArrowLeft, CalendarCheck, MapPin, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
-import { addProgressNote, cancelVisit, completeWork, getCase, proposeVisitTimes, respondToOffer, startWork, useQuery } from "wasp/client/operations";
+import { addProgressNote, cancelVisit, completeWork, getCase, proposeVisitTimes, requestMoreBudget, respondToOffer, startWork, useQuery } from "wasp/client/operations";
 import type { CaseDetail } from "../../../shared/views";
 import { NextActionBar, SeverityBadge, Timeline } from "../../components/case";
 import { Shell } from "../../components/shell";
@@ -26,7 +26,7 @@ function Detail({ caseId }: { caseId: string }) {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">{c.title}</h1>
         <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
-          <span className="tnum">{c.ref}</span>
+          <span className="font-mono text-[13px]">{c.ref}</span>
           <SeverityBadge severity={c.severity} />
           <span className="flex items-center gap-1">
             <MapPin className="size-3.5" /> {c.propertyAddress}, unit {c.unitLabel}
@@ -35,6 +35,7 @@ function Detail({ caseId }: { caseId: string }) {
       </div>
       <NextActionBar c={c} viewer="CONTRACTOR" />
       <Work c={c} />
+      <Budget c={c} />
       {c.appointment && (
         <Panel className="flex items-center gap-3 p-4">
           <CalendarCheck className="size-5 text-ok" />
@@ -236,6 +237,46 @@ function Work({ c }: { c: CaseDetail }) {
     return <Notice tone={c.status === "RESOLVED" ? "ok" : "info"}>{c.status === "RESOLVED" ? "The resident confirmed the fix. Job closed." : "Waiting for the resident to confirm the fix."}</Notice>;
   }
   return null;
+}
+
+/** Asking for more than the approved amount: the manager decides; the work should not exceed the approval meanwhile. */
+function Budget({ c }: { c: CaseDetail }) {
+  const a = useAction();
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const cr = c.assignment?.changeRequest;
+  const cap = c.assignment?.approval?.capCents ?? c.assignment?.approval?.amountCents ?? null;
+  if (cr?.status === "PENDING") {
+    return (
+      <Notice tone="warn" title={`Waiting for the manager: ${money(cr.cents)} more`}>
+        You asked {c.assignment?.changeRequest?.requestedAt ? "for more budget" : ""}: “{cr.reason}”. Stay within {money(cap)} until they decide.
+      </Notice>
+    );
+  }
+  if (!c.can.requestMoreBudget) {
+    if (cr) return <Notice tone={cr.status === "APPROVED" ? "ok" : "info"}>{cr.status === "APPROVED" ? `Approved: ${money(cr.cents)} more. The new maximum is ${money(cap)}.` : `Not approved: stay within ${money(cap)}, or stop and report back to the manager.`}</Notice>;
+    return null;
+  }
+  const cents = toCents(amount);
+  return (
+    <Panel>
+      <PanelHeader title="Need more than the approved amount?">The manager decides. Nothing above {money(cap) || "the approval"} is authorised until they do.</PanelHeader>
+      <div className="space-y-3 p-4">
+        {a.error && <Notice tone="danger">{a.error}</Notice>}
+        <div className="max-w-48">
+          <Label htmlFor="more">Additional amount (CAD)</Label>
+          <Input id="more" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="350" />
+        </div>
+        <div>
+          <Label htmlFor="why">What it is for</Label>
+          <Textarea id="why" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="For example: the shut-off valve is seized and needs replacing." />
+        </div>
+        <Button variant="outline" disabled={!cents || reason.trim().length < 5} busy={a.busy === "ask"} onClick={async () => (await a.run("ask", () => requestMoreBudget({ caseId: c.id, additionalCents: cents!, reason }))) && (setAmount(""), setReason(""))}>
+          Ask the manager for {cents ? money(cents) : "more"}
+        </Button>
+      </div>
+    </Panel>
+  );
 }
 
 function CancelVisit({ caseId }: { caseId: string }) {

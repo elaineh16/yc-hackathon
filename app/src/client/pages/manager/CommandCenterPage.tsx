@@ -1,71 +1,120 @@
-import { Bot, Sparkles } from "lucide-react";
+// The manager's command center. Every number is counted from the database on each refresh; nothing is estimated.
+import { AlarmClock, ArrowUpRight, Bot, Building2, CircleAlert, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { getCommandCenter, useQuery } from "wasp/client/operations";
-import type { CaseListItem } from "../../../shared/views";
+import { CATEGORY_SHORT, isTrade, TRADE_NOUN } from "../../../shared/domain";
+import type { CaseListItem, CommandCenter } from "../../../shared/views";
 import { SeverityBadge, StatusBadge } from "../../components/case";
+import { eventKind, eventLabel, Provenance, Ref } from "../../components/provenance";
 import { PageTitle, Shell } from "../../components/shell";
-import { dueIn, when } from "../../lib";
+import { clock, dueIn, when } from "../../lib";
 import { Badge, cn, Empty, Panel, PanelHeader, Spinner } from "../../ui";
 
 export function CommandCenterPage() {
-  return <Shell role="MANAGER">{(me) => <Command name={me.name.split(" ")[0]} />}</Shell>;
+  return <Shell role="MANAGER" wide>{(me) => <Command name={me.name.split(" ")[0]} />}</Shell>;
+}
+
+function Kpi({ label, value, to, tone, hint }: { label: string; value: ReactNode; to?: string; tone?: "move" | "danger"; hint?: ReactNode }) {
+  const body = (
+    <>
+      <p className={cn("font-mono text-[26px] leading-none font-medium tracking-tight tnum", tone === "danger" && "text-danger", tone === "move" && "text-[#b8460a]")}>{value}</p>
+      <p className="mt-2 text-[12px] text-muted group-hover:text-ink">{label}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-faint">{hint}</p>}
+    </>
+  );
+  const cls = "group block rounded-lg border border-line bg-surface px-4 py-3.5 transition-colors hover:border-line-strong";
+  return to ? (
+    <Link to={to} className={cls}>
+      {body}
+    </Link>
+  ) : (
+    <div className={cls}>{body}</div>
+  );
 }
 
 function Command({ name }: { name: string }) {
   const { data: d, isLoading } = useQuery(getCommandCenter, undefined, { refetchInterval: 5000 });
   if (isLoading || !d) return <Spinner />;
-  const stat = (label: string, value: number, to: string, tone?: "move" | "danger") => (
-    <Link to={to} className="group rounded-lg border border-line bg-surface px-4 py-3 hover:border-line-strong">
-      <p className={cn("tnum text-2xl font-semibold", value > 0 && tone === "danger" && "text-danger", value > 0 && tone === "move" && "text-[#b8460a]")}>{value}</p>
-      <p className="text-sm text-muted group-hover:text-ink">{label}</p>
-    </Link>
-  );
+  const c = d.counts;
+  const m = d.metrics;
+  const hours = (h: number | null) => (h === null ? "–" : h < 48 ? `${h}h` : `${Math.round(h / 24)}d`);
+  const emails = m.emailsLast24h;
   return (
     <>
-      <PageTitle title={`Good to see you, ${name}`}>Live view of every open case at your properties. Numbers are counted from the cases themselves.</PageTitle>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {stat("Open cases", d.counts.open, "/ops/cases")}
-        {stat("Waiting on you", d.counts.waitingOnManager, "/ops/cases?holder=MANAGER", "move")}
-        {stat("Emergencies", d.counts.emergencies, "/ops/cases?severity=EMERGENCY", "danger")}
-        {stat("Overdue", d.counts.overdue, "/ops/cases?sort=due", "danger")}
-        {stat("With contractors", d.counts.waitingOnContractors, "/ops/cases?holder=CONTRACTOR")}
-        {stat("With residents", d.counts.waitingOnResidents, "/ops/cases?holder=RESIDENT")}
+      <PageTitle eyebrow="Command center" title={`Good to see you, ${name}`} action={<p className="text-xs text-faint">Counted from the database at {clock(d.generatedAt)}; refreshes every 5 s</p>}>
+        What is waiting on whom across your properties, and what Relay's AI did about it.
+      </PageTitle>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+        <Kpi label="Open cases" value={c.open} to="/ops/cases" />
+        <Kpi label="Waiting on you" value={c.waitingOnManager} to="/ops/cases?holder=MANAGER" tone={c.waitingOnManager ? "move" : undefined} />
+        <Kpi label="Emergencies" value={c.emergencies} to="/ops/cases?severity=EMERGENCY" tone={c.emergencies ? "danger" : undefined} />
+        <Kpi label="Overdue" value={c.overdue} to="/ops/cases?sort=due" tone={c.overdue ? "danger" : undefined} />
+        <Kpi label="With contractors" value={c.waitingOnContractors} to="/ops/cases?holder=CONTRACTOR" />
+        <Kpi label="With residents" value={c.waitingOnResidents} to="/ops/cases?holder=RESIDENT" />
+        <Kpi label="Resolved, 7 days" value={c.resolvedThisWeek} to="/ops/cases?status=RESOLVED" />
+        <Kpi label="Median time to resolve" value={hours(m.medianHoursToResolve)} hint={`${m.resolvedLast30} resolved in 30 days`} />
       </div>
-      <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 rounded-lg border border-line bg-surface px-4 py-2.5 text-[12px] text-muted">
+        <span>
+          <span className="eyebrow mr-1.5">AI proposals, 30 d</span>
+          <span className="font-mono text-ink">{m.aiProposalsLast30}</span> made, <span className="font-mono text-ink">{m.aiAcceptedLast30}</span> carried out, <span className="font-mono text-ink">{m.aiRejectedLast30}</span> rejected
+        </span>
+        <span>
+          <span className="eyebrow mr-1.5">Coordinator, 24 h</span>
+          <span className="font-mono text-ink">{m.coordinatorRunsLast24h}</span> reviews{m.coordinatorFailedLast24h ? <span className="text-danger">, {m.coordinatorFailedLast24h} failed</span> : null}
+        </span>
+        <span>
+          <span className="eyebrow mr-1.5">Email, 24 h</span>
+          <span className="font-mono text-ink">{emails.accepted}</span> accepted by a mail server, <span className="font-mono text-ink">{emails.captured}</span> captured (test), <span className="font-mono text-ink">{emails.skipped}</span> not sent
+          {emails.failed ? <span className="text-danger">, {emails.failed} failed</span> : null}
+          {emails.pending ? `, ${emails.pending} queued` : ""}
+        </span>
+      </div>
+
+      <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
         <div className="min-w-0 space-y-5">
           {d.attention.length > 0 && (
             <Panel className="border-[#f0c4be]">
-              <PanelHeader title="Needs attention">Emergencies, escalations and overdue actions.</PanelHeader>
+              <PanelHeader title={<span className="flex items-center gap-2"><CircleAlert className="size-4 text-danger" /> Needs attention</span>}>Emergencies, escalations and anything past its deadline, whoever holds it.</PanelHeader>
               <CaseRows items={d.attention} />
             </Panel>
           )}
           <Panel>
-            <PanelHeader title="Your move">Cases waiting on a manager, oldest first.</PanelHeader>
-            {d.waitingOnManager.length ? <CaseRows items={d.waitingOnManager} /> : <Empty title="Nothing waiting on you">New reports and decisions will appear here.</Empty>}
+            <PanelHeader title="Your move" action={<Link to="/ops/cases?holder=MANAGER" className="flex items-center gap-1 text-xs text-muted hover:text-ink">All <ArrowUpRight className="size-3.5" /></Link>}>
+              Human intervention queue: what needs a person now, most urgent first, and why.
+            </PanelHeader>
+            {d.humanQueue.length ? (
+              <ul className="divide-y divide-line">
+                {d.humanQueue.map((q) => (
+                  <li key={q.id}>
+                    <Row c={q} reason={q.why} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty title="Nothing waiting on you">New reports and decisions will appear here.</Empty>
+            )}
           </Panel>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <DiscoveryQueue d={d} />
+            <AiWorkflows d={d} />
+          </div>
           <div className="grid gap-5 md:grid-cols-2">
             <Panel>
-              <PanelHeader title="With contractors" />
+              <PanelHeader title="With contractors">Offers, visits and work in progress.</PanelHeader>
               {d.waitingOnContractors.length ? <CaseRows items={d.waitingOnContractors} compact /> : <Empty title="None" />}
             </Panel>
             <Panel>
-              <PanelHeader title="With residents" />
+              <PanelHeader title="With residents">Visit times and confirmations they owe.</PanelHeader>
               {d.waitingOnResidents.length ? <CaseRows items={d.waitingOnResidents} compact /> : <Empty title="None" />}
             </Panel>
           </div>
         </div>
-        <div className="space-y-5">
+        <aside className="space-y-5">
           <Panel className="border-[#d5daf0]">
-            <PanelHeader
-              title={
-                <span className="flex items-center gap-2">
-                  <Sparkles className="size-4 text-ai" /> Relay suggestions
-                </span>
-              }
-            >
-              Proposals from the AI coordinator waiting for your decision.
-            </PanelHeader>
+            <PanelHeader title={<span className="flex items-center gap-2"><Sparkles className="size-4 text-ai" /> Relay suggestions</span>}>Proposals from the AI coordinator. Nothing here has happened yet.</PanelHeader>
             {d.suggestions.length === 0 ? (
               <p className="px-4 py-5 text-sm text-muted">No suggestions waiting.</p>
             ) : (
@@ -73,11 +122,12 @@ function Command({ name }: { name: string }) {
                 {d.suggestions.map((s) => (
                   <li key={s.id}>
                     <Link to={`/ops/cases/${s.caseId}`} className="block px-4 py-3 hover:bg-sunk">
-                      <p className="text-sm font-medium">{s.summary}</p>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{s.rationale}</p>
-                      <p className="mt-1 text-xs text-faint">
-                        {s.caseRef}, {s.caseTitle}
+                      <p className="flex items-center gap-2">
+                        <Provenance kind="ai-proposal" />
+                        <Ref>{s.caseRef}</Ref>
                       </p>
+                      <p className="mt-1.5 text-sm font-medium">{s.summary}</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{s.rationale}</p>
                     </Link>
                   </li>
                 ))}
@@ -85,59 +135,163 @@ function Command({ name }: { name: string }) {
             )}
           </Panel>
           <Panel>
-            <PanelHeader title="Recent activity" />
+            <PanelHeader title={<span className="flex items-center gap-2"><AlarmClock className="size-4 text-muted" /> Overdue acknowledgements</span>}>People asked to act by a deadline that has passed.</PanelHeader>
+            {d.overdueAcks.length === 0 ? (
+              <p className="px-4 py-5 text-sm text-muted">Nobody is overdue.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {d.overdueAcks.map((n) => (
+                  <li key={n.id}>
+                    <Link to={n.caseId ? `/ops/cases/${n.caseId}` : "/ops"} className="block px-4 py-2.5 hover:bg-sunk">
+                      <p className="flex flex-wrap items-center gap-2 text-xs">
+                        {n.caseRef && <Ref>{n.caseRef}</Ref>}
+                        <span className="font-medium text-ink-2">{n.recipient}</span>
+                        <Badge tone="outline">{n.role.toLowerCase()}</Badge>
+                        <span className="ml-auto text-danger">{dueIn(n.dueAt)?.text}</span>
+                      </p>
+                      <p className="mt-0.5 line-clamp-1 text-sm">{n.title}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+          <Panel>
+            <PanelHeader title="Recent activity">Everything that happened, labelled by who did it.</PanelHeader>
             <ul className="divide-y divide-line">
               {d.recent.length === 0 && <li className="px-4 py-5 text-sm text-muted">No activity yet.</li>}
               {d.recent.map((e) => (
                 <li key={e.id}>
                   <Link to={`/ops/cases/${e.caseId}`} className="block px-4 py-2.5 hover:bg-sunk">
-                    <p className="flex items-center gap-1.5 text-xs text-muted">
-                      <span className="tnum font-medium text-ink-2">{e.caseRef}</span>
-                      {e.actorRole === "AGENT" && <Bot className="size-3.5 text-ai" aria-label="Relay AI" />}
-                      {e.actorName}, {when(e.at)}
+                    <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                      <Ref className="text-ink-2">{e.caseRef}</Ref>
+                      <Provenance kind={eventKind(e)} label={eventLabel(e)} />
+                      <span className="ml-auto text-faint">{when(e.at)}</span>
                     </p>
-                    <p className="mt-0.5 line-clamp-2 text-sm">{e.message}</p>
+                    <p className="mt-1 line-clamp-2 text-[13px]">{e.message}</p>
                   </Link>
                 </li>
               ))}
             </ul>
           </Panel>
-        </div>
+        </aside>
       </div>
     </>
+  );
+}
+
+function DiscoveryQueue({ d }: { d: CommandCenter }) {
+  const label = (s: string) => ({ AWAITING_MANAGER: "Needs your approval", QUEUED: "Queued", RUNNING: "Searching", FAILED: "Failed", SKIPPED: "Not run" })[s] ?? s;
+  return (
+    <Panel>
+      <PanelHeader title={<span className="flex items-center gap-2"><Building2 className="size-4 text-muted" /> Vendor discovery</span>} action={<Link to="/ops/vendors" className="flex items-center gap-1 text-xs text-muted hover:text-ink">Vendors <ArrowUpRight className="size-3.5" /></Link>}>
+        Trades with no approved vendor. Found businesses are never contacted or offered work until you verify and approve one.
+      </PanelHeader>
+      {d.discovery.searches.length === 0 && d.discovery.toReview.length === 0 ? (
+        <p className="px-4 py-5 text-sm text-muted">Every open case has an approved vendor to go to.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {d.discovery.searches.map((s) => (
+            <li key={s.id}>
+              <Link to={s.caseId ? `/ops/cases/${s.caseId}#discovery` : "/ops/vendors"} className="block px-4 py-2.5 hover:bg-sunk">
+                <p className="flex flex-wrap items-center gap-2 text-xs">
+                  {s.caseRef && <Ref>{s.caseRef}</Ref>}
+                  <Provenance kind={s.status === "FAILED" ? "failed" : s.status === "SKIPPED" ? "skipped" : "waiting"} label={label(s.status)} />
+                  <span className="ml-auto text-faint">{when(s.at)}</span>
+                </p>
+                <p className="mt-1 text-[13px]">
+                  {isTrade(s.trade) ? TRADE_NOUN[s.trade] : CATEGORY_SHORT[s.trade]} for {s.caseTitle}
+                </p>
+                {s.error && <p className="mt-0.5 line-clamp-1 text-xs text-danger">{s.error}</p>}
+              </Link>
+            </li>
+          ))}
+          {d.discovery.toReview.map((g) => (
+            <li key={`${g.trade}-${g.status}`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
+              <span>
+                {g.count} {isTrade(g.trade) ? TRADE_NOUN[g.trade] : CATEGORY_SHORT[g.trade]}
+                {g.count === 1 ? "" : "s"} {g.status === "VERIFIED" ? "verified, ready to approve" : g.status === "SHORTLISTED" ? "shortlisted" : "to review"}
+              </span>
+              <Link to="/ops/vendors" className="text-xs text-muted hover:text-ink">
+                Review
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+/** Consecutive reviews skipped for the same reason are shown once, with the cases they covered. */
+function groupRuns(runs: CommandCenter["aiRuns"]) {
+  const out: (CommandCenter["aiRuns"][number] & { refs: string[] })[] = [];
+  for (const r of runs) {
+    const last = out.at(-1);
+    if (last && r.status === "SKIPPED" && last.status === "SKIPPED" && last.summary === r.summary) last.refs.push(r.caseRef);
+    else out.push({ ...r, refs: [r.caseRef] });
+  }
+  return out;
+}
+
+function AiWorkflows({ d }: { d: CommandCenter }) {
+  const runs = groupRuns(d.aiRuns);
+  return (
+    <Panel>
+      <PanelHeader title={<span className="flex items-center gap-2"><Bot className="size-4 text-ai" /> Relay AI workflows</span>}>The coordinator's recent reviews, as recorded: what woke it and what it did.</PanelHeader>
+      {d.aiRuns.length === 0 ? (
+        <p className="px-4 py-5 text-sm text-muted">No reviews in the last 24 hours.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {runs.map((r) => (
+            <li key={r.id}>
+              <Link to={`/ops/cases/${r.caseId}`} className="block px-4 py-2.5 hover:bg-sunk">
+                <p className="flex flex-wrap items-center gap-2 text-xs">
+                  <Ref>{r.refs.length > 1 ? `${r.refs.length} cases (${r.refs.slice(0, 3).join(", ")}${r.refs.length > 3 ? ", …" : ""})` : r.caseRef}</Ref>
+                  <Provenance kind={r.status === "SUCCEEDED" ? "ai-action" : r.status === "RUNNING" ? "waiting" : r.status === "SKIPPED" ? "skipped" : "failed"} label={r.status === "SUCCEEDED" ? "Reviewed" : r.status.toLowerCase()} />
+                  <span className="text-faint">after {r.trigger.toLowerCase().replace(/_/g, " ")}</span>
+                  <span className="ml-auto text-faint">{r.durationMs ? `${Math.round(r.durationMs / 1000)} s · ` : ""}{when(r.at)}</span>
+                </p>
+                <p className="mt-1 line-clamp-2 text-[13px] text-ink-2">{r.summary}</p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function Row({ c, reason, compact }: { c: CaseListItem; reason?: string; compact?: boolean }) {
+  const due = dueIn(c.nextActionDueAt);
+  return (
+    <Link to={`/ops/cases/${c.id}`} className="flex flex-col gap-1 px-4 py-3 hover:bg-sunk sm:flex-row sm:items-center sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-center gap-2">
+          <Ref>{c.ref}</Ref>
+          <span className="truncate font-medium">{c.title}</span>
+          {c.severity !== "ROUTINE" && <SeverityBadge severity={c.severity} />}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-muted">
+          {c.propertyName}, unit {c.unitLabel}. {reason ? <span className="text-ink-2">{reason}</span> : <>Next: {c.nextAction.toLowerCase()}</>}
+        </p>
+      </div>
+      {!compact && <StatusBadge status={c.status} category={c.category} />}
+      <span className={cn("font-mono text-[11px] whitespace-nowrap", due?.overdue ? "font-medium text-danger" : "text-muted")}>{due ? due.text : when(c.statusChangedAt)}</span>
+    </Link>
   );
 }
 
 export function CaseRows({ items, compact }: { items: CaseListItem[]; compact?: boolean }): ReactNode {
   return (
     <ul className="divide-y divide-line">
-      {items.map((c) => {
-        const due = dueIn(c.nextActionDueAt);
-        return (
-          <li key={c.id}>
-            <Link to={`/ops/cases/${c.id}`} className="flex flex-col gap-1 px-4 py-3 hover:bg-sunk sm:flex-row sm:items-center sm:gap-4">
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-center gap-2">
-                  <span className="tnum text-xs text-muted">{c.ref}</span>
-                  <span className="truncate font-medium">{c.title}</span>
-                  {c.severity !== "ROUTINE" && <SeverityBadge severity={c.severity} />}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-muted">
-                  {c.propertyName}, unit {c.unitLabel}. Next: {c.nextAction.toLowerCase()}
-                </p>
-              </div>
-              {!compact && <StatusBadge status={c.status} />}
-              <span className={cn("text-xs whitespace-nowrap", due?.overdue ? "font-medium text-danger" : "text-muted")}>{due ? due.text : when(c.statusChangedAt)}</span>
-            </Link>
-          </li>
-        );
-      })}
+      {items.map((c) => (
+        <li key={c.id}>
+          <Row c={c} compact={compact} />
+        </li>
+      ))}
     </ul>
   );
 }
 
-export const AiBadge = () => (
-  <Badge tone="ai">
-    <Bot /> AI
-  </Badge>
-);
+export const AiBadge = () => <Provenance kind="ai-action" label="AI" />;

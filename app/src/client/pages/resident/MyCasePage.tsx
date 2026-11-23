@@ -104,14 +104,15 @@ function YourMove({ c }: { c: CaseDetail }) {
         <div className="space-y-3 p-4">
           {a.error && <Notice tone="danger">{a.error}</Notice>}
           {c.assignment?.completionNotes && <p className="rounded-md bg-sunk px-3 py-2 text-sm">“{c.assignment.completionNotes}”</p>}
-          <Button variant="move" busy={a.busy === "yes"} onClick={() => a.run("yes", () => confirmResolution({ caseId: c.id, resolved: true }))}>
-            <CheckCircle2 /> Yes, it's fixed
+          <Button variant="move" className="w-full sm:w-auto" busy={a.busy === "yes"} onClick={() => a.run("yes", () => confirmResolution({ caseId: c.id, resolved: true }))}>
+            <CheckCircle2 /> Yes, resolved
           </Button>
-          <div className="flex gap-2">
-            <Textarea className="min-h-9" value={note} onChange={(e) => setNote(e.target.value)} placeholder="If not, what is still wrong?" aria-label="What is still wrong" />
-            <Button variant="danger-outline" disabled={note.trim().length < 3} busy={a.busy === "no"} onClick={() => a.run("no", () => confirmResolution({ caseId: c.id, resolved: false, note }))}>
-              Not fixed
+          <div className="space-y-2 rounded-md border border-line p-3">
+            <Textarea className="min-h-16" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What is still wrong?" aria-label="What is still wrong" />
+            <Button variant="danger-outline" className="w-full sm:w-auto" disabled={note.trim().length < 3} busy={a.busy === "no"} onClick={() => a.run("no", () => confirmResolution({ caseId: c.id, resolved: false, note }))}>
+              No, still having problems
             </Button>
+            <p className="text-xs text-muted">The case reopens and your property manager follows up.</p>
           </div>
         </div>
       </Panel>
