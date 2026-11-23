@@ -38,7 +38,7 @@ jobs:
           node-version: "24.22.1"
       - name: Install the Wasp CLI
         run: npm i -g @wasp.sh/wasp-cli@0.22.0
-      - name: Environment (no secrets: fixtures for discovery, Mailpit for email, no model)
+      - name: "Environment (no secrets: fixtures for discovery, Mailpit for email, no model)"
         run: |
           cat > .env.server <<'EOF'
           LLM_DISABLED=true
@@ -59,7 +59,7 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       - name: Unit tests
         run: npx tsx --test tests/unit/*.test.ts
-      - name: AI evaluation, deterministic (99 cases + 30 held out), with the safety gate
+      - name: AI evaluation, deterministic (99 cases and two held-out sets), with the safety gate
         run: npx tsx tests/eval/deterministic.ts --gate
       - name: Database (migrations, then the demo accounts)
         run: |
