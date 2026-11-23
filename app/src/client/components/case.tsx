@@ -19,7 +19,7 @@ export function NextActionBar({ c, viewer }: { c: Pick<CaseListItem, "status" | 
   const due = dueIn(c.nextActionDueAt);
   if (c.holder === "NONE") {
     return (
-      <div className="flex items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 text-sm">
+      <div className="flex items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 text-sm" data-testid="next-action">
         <StatusBadge status={c.status} />
         <span className="text-muted">{c.status === "RESOLVED" ? "This case is closed." : "This case was cancelled."}</span>
       </div>

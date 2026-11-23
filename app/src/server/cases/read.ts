@@ -149,9 +149,13 @@ export async function caseDetail(actor: ActorCtx, caseId: unknown): Promise<Case
     summary: c.summary,
     triageSource: c.triageSource as TriageSource,
     triageReasons: role === "MANAGER" ? c.triageReasons : [],
-    answers: QUESTIONS[c.category]
-      .filter((q) => details[q.key] !== undefined)
-      .map((q) => ({ key: q.key, question: q.label, answer: optionLabel(c.category, q.key, details[q.key]), safety: !!q.safety })),
+    answers: [
+      ...QUESTIONS[c.category].filter((q) => details[q.key] !== undefined).map((q) => ({ key: q.key, question: q.label, answer: optionLabel(c.category, q.key, details[q.key]), safety: !!q.safety })),
+      // Facts an agent recorded in its own words (chat and voice intake).
+      ...Object.entries(details)
+        .filter(([k]) => !QUESTIONS[c.category].some((q) => q.key === k))
+        .map(([k, v]) => ({ key: k, question: k.replace(/_/g, " ").replace(/^./, (x) => x.toUpperCase()), answer: v === true ? "Yes" : v === false ? "No" : String(v ?? ""), safety: false })),
+    ],
     permissionToEnter: c.permissionToEnter,
     accessNotes: c.accessNotes,
     propertyAddress: c.property.address,
@@ -161,7 +165,11 @@ export async function caseDetail(actor: ActorCtx, caseId: unknown): Promise<Case
     appointment: confirmed ? slotView(confirmed) : null,
     events: events
       .filter((e) => visibleEvent(e, actor))
-      .map((e): EventView => ({ id: e.id, at: e.createdAt.toISOString(), actorRole: e.actorRole as Actor, actorName: e.actorName, type: e.type, message: e.message, fromStatus: e.fromStatus, toStatus: e.toStatus, audience: e.audience })),
+      .map((e): EventView => {
+        // Contractors get the resident's first name only, in the history as everywhere else.
+        const hide = (s: string) => (role === "CONTRACTOR" ? s.split(c.resident.displayName).join(firstName(c.resident.displayName)) : s);
+        return { id: e.id, at: e.createdAt.toISOString(), actorRole: e.actorRole as Actor, actorName: hide(e.actorName), type: e.type, message: hide(e.message), fromStatus: e.fromStatus, toStatus: e.toStatus, audience: e.audience };
+      }),
     resolution: c.resolution,
     resolvedAt: iso(c.resolvedAt),
     cancelledAt: iso(c.cancelledAt),

@@ -174,6 +174,10 @@ export function decideSpend(actor: ActorCtx, input: { caseId: string; approve: b
       await notify(tx, [c.residentId], c.id, `rejected:${approval.id}`, { kind: "UPDATE", title: `Update on ${c.title}`, body: "The manager is arranging a different vendor." });
       return done(c);
     }
+    // An inspection-first response has no repair price yet: the manager must say how much they approve.
+    if (a.estimateType === "INSPECTION_REQUIRED" && input.capCents === undefined) {
+      throw new HttpError(400, "This vendor needs to inspect before pricing. Enter the maximum you approve for the inspection and repair.", { code: "cap_required" });
+    }
     const cap = input.capCents ?? approval.amountCents;
     if (typeof cap !== "number" || !Number.isInteger(cap) || cap <= 0) throw new HttpError(400, "Enter the maximum amount you approve.", { code: "cap_required" });
     if (approval.amountCents !== null && cap < approval.amountCents) throw new HttpError(400, `The approved maximum (${formatMoney(cap)}) is below the estimate (${formatMoney(approval.amountCents)}).`, { code: "cap_below_estimate" });

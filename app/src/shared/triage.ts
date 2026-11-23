@@ -32,9 +32,15 @@ const HAZARDS: { pattern: RegExp; reason: string; advice: string }[] = [
     advice: "Leave the unit now. Do not use switches or flames. Call your gas utility's emergency line or 911 from outside.",
   },
   {
-    pattern: /\b(fire|flames?|smoke|smoking|smoulder\w*|smolder\w*|sparks?|sparking|burning smell|smells? (like )?burning)\b/i,
+    // "smoke" alone, but not the name of the device: a chirping smoke detector is a battery, not a fire.
+    pattern: /\b(fire(?! (alarm|detector|extinguisher|door|escape))|flames?|smoke(?! (detector|alarm))|smoking|smoulder\w*|smolder\w*|sparks?|sparking|burning smell|smells? (like )?burning)\b/i,
     reason: "The report mentions fire, smoke, sparks or a burning smell.",
     advice: "If there is fire or smoke, get everyone out and call 911. Do not use the appliance or the outlet.",
+  },
+  {
+    pattern: /\b(smoke|fire|co|carbon monoxide) (alarm|detector)s? (is |are |keeps |kept )?(going off|sounding|ringing|blaring|screaming)\b/i,
+    reason: "An alarm is going off.",
+    advice: "If an alarm is sounding, get everyone out and call 911 from outside.",
   },
   {
     pattern: /\b(carbon monoxide|co (alarm|detector))\b/i,
@@ -55,10 +61,15 @@ const HAZARDS: { pattern: RegExp; reason: string; advice: string }[] = [
 // "no smoke", "not flooding", "isn't sparking": a negated mention is not a hazard report.
 const NEGATED = /\b(no|not|isn'?t|aren'?t|wasn'?t|without|never|don'?t|doesn'?t|didn'?t)\b[\w\s']{0,24}$/i;
 
-const KEYWORDS: Record<Exclude<Category, "OTHER">, RegExp> = {
-  PLUMBING: /\b(sink|faucet|tap|toilet|drain(s|ing|ed)?|clog(s|ged)?|pipe|pipes|leak(s|ing|ed|y)?|drip(s|ping)?|shower|bath ?tub|tub|water heater|hot water|water pressure|plumb\w*|sewer|garbage disposal)\b/gi,
-  APPLIANCE: /\b(washer|washing machine|dryer|fridge|refrigerator|freezer|stove|oven|range|cooktop|dishwasher|microwave|laundry|appliance)\b/gi,
-  HVAC: /\b(heat(ing|er)?|furnace|radiator|thermostat|boiler|a\/?c|air[- ]?con(ditioning|ditioner)?|cooling|hvac|vent(s|ilation)?|baseboard)\b/gi,
+// Nouns name the thing that is broken and weigh more than symptom words that fit several trades:
+// "the washing machine will not drain" is an appliance problem, even though "drain" is a plumbing word.
+const KEYWORDS: Record<Exclude<Category, "OTHER">, { nouns: RegExp; symptoms?: RegExp }> = {
+  PLUMBING: {
+    nouns: /\b(sink|faucet|tap|toilet|pipe|pipes|shower|bath ?tub|tub|water-heater-unit|hot water|water pressure|plumb\w*|sewer|garbage disposal)\b/gi,
+    symptoms: /\b(drain(s|ing|ed)?|clog(s|ged)?|leak(s|ing|ed|y)?|drip(s|ping)?)\b/gi,
+  },
+  APPLIANCE: { nouns: /\b(washer|washing machine|dryer|fridge|refrigerator|freezer|stove|oven|range|cooktop|dishwasher|microwave|laundry|appliance)\b/gi },
+  HVAC: { nouns: /\b(heat(ing|er)?|furnace|radiator|thermostat|boiler|a\/?c|air[- ]?con(ditioning|ditioner)?|cooling|hvac|vent(s|ilation)?|baseboard)\b/gi },
 };
 
 const sentence = (s: string) => {
@@ -70,11 +81,12 @@ const sentence = (s: string) => {
 function ruleCategory(description: string): { category: Category; hits: number; runnerUp: number } {
   // "water heater" is plumbing even though it contains "heater".
   const text = description.replace(/water heater/gi, "water-heater-unit");
-  const score = (re: RegExp) => new Set((text.match(re) ?? []).map((m) => m.toLowerCase())).size;
+  const distinct = (re?: RegExp) => (re ? new Set((text.match(re) ?? []).map((m) => m.toLowerCase())).size : 0);
+  const score = (k: Exclude<Category, "OTHER">) => 2 * distinct(KEYWORDS[k].nouns) + distinct(KEYWORDS[k].symptoms);
   const scores: [Category, number][] = [
-    ["PLUMBING", score(KEYWORDS.PLUMBING) + (/water-heater-unit/.test(text) ? 2 : 0)],
-    ["APPLIANCE", score(KEYWORDS.APPLIANCE)],
-    ["HVAC", score(KEYWORDS.HVAC)],
+    ["PLUMBING", score("PLUMBING")],
+    ["APPLIANCE", score("APPLIANCE")],
+    ["HVAC", score("HVAC")],
   ];
   scores.sort((a, b) => b[1] - a[1]);
   return scores[0][1] === 0 ? { category: "OTHER", hits: 0, runnerUp: 0 } : { category: scores[0][0], hits: scores[0][1], runnerUp: scores[1][1] };

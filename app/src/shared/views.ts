@@ -246,6 +246,10 @@ export type PropertySettings = {
   name: string;
   address: string;
   emergencyInstructions: string;
+  /** Building notes the agents search. */
+  knowledge: string;
+  /** Relay AI may send routine offers without waiting for a manager. */
+  autopilotRoutine: boolean;
   approvalThresholdCents: number;
   vendorResponseMinutes: number;
   verificationReminderMinutes: number;

@@ -20,13 +20,21 @@ import { searchKnowledge, searchPastCases } from "./knowledge";
 import { LlmUnavailable, llmConfig, llmStatus } from "./llm";
 import { runLoop, type Step, str, type Tool } from "./loop";
 
+// Debounce: one queued job per case at a time. This is an optimisation only; correctness comes from the durable
+// marker on the case and the one-run-per-trigger key, and the sweep re-queues anything a restart lost.
+const queuedAt = new Map<string, number>();
+
 /** Queue a coordinator run for this case if something is pending. Safe to call after any write; never throws. */
 export async function kickCoordinator(caseId: string | null | undefined) {
   if (!caseId) return;
   try {
     const c = await prisma.case.findUnique({ where: { id: caseId }, select: { agentPendingSince: true } });
-    if (c?.agentPendingSince) await coordinatorJob.submit({ caseId });
+    if (!c?.agentPendingSince) return;
+    if (Date.now() - (queuedAt.get(caseId) ?? 0) < 120_000) return;
+    queuedAt.set(caseId, Date.now());
+    await coordinatorJob.submit({ caseId });
   } catch (e) {
+    queuedAt.delete(caseId);
     console.warn("[coordinator] could not queue a run; the sweep will retry:", (e as Error)?.name);
   }
 }
@@ -61,6 +69,7 @@ export async function runCoordinator(caseId: string): Promise<{ status: string; 
     await prisma.agentRun.update({ where: { id: runId }, data: { status, steps: steps as object[], finalText, error, finishedAt: new Date(), durationMs: Date.now() - started } });
     await clearPending();
     // A newer trigger may have arrived while this run was thinking.
+    queuedAt.delete(caseId);
     await kickCoordinator(caseId);
   };
 

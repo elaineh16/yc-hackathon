@@ -26,6 +26,8 @@ export async function getSettings(actor: ActorCtx): Promise<Settings> {
       name: p.name,
       address: p.address,
       emergencyInstructions: p.emergencyInstructions,
+      knowledge: p.knowledge,
+      autopilotRoutine: p.autopilotRoutine,
       approvalThresholdCents: p.approvalThresholdCents,
       vendorResponseMinutes: p.vendorResponseMinutes,
       verificationReminderMinutes: p.verificationReminderMinutes,
@@ -48,6 +50,8 @@ export type PropertyUpdate = {
   name?: string;
   address?: string;
   emergencyInstructions?: string;
+  knowledge?: string;
+  autopilotRoutine?: boolean;
   approvalThresholdCents?: number;
   vendorResponseMinutes?: number;
   verificationReminderMinutes?: number;
@@ -79,6 +83,8 @@ export async function updateProperty(actor: ActorCtx, input: PropertyUpdate) {
       name,
       address,
       emergencyInstructions,
+      knowledge: input.knowledge === undefined ? undefined : String(input.knowledge).split(String.fromCharCode(13)).join("").trim().slice(0, 6000),
+      autopilotRoutine: input.autopilotRoutine === undefined ? undefined : input.autopilotRoutine === true,
       approvalThresholdCents: within(input.approvalThresholdCents, 0, 10_000_000, "The approval threshold (cents)"),
       vendorResponseMinutes: within(input.vendorResponseMinutes, 5, 20160, "The vendor response time (minutes)"),
       verificationReminderMinutes: reminder,
