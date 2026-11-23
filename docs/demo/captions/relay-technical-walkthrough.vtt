@@ -1,0 +1,237 @@
+WEBVTT
+
+1
+00:00:01.180 --> 00:00:05.843
+This is a technical walkthrough of Relay version one point one: how it is built,
+
+2
+00:00:05.843 --> 00:00:09.865
+why the model reasons but the backend decides, and how it was tested.
+
+3
+00:00:11.565 --> 00:00:15.862
+Relay is a Wasp application: React and TypeScript in the browser,
+
+4
+00:00:15.862 --> 00:00:18.969
+Node on the server, and Prisma over PostgreSQL.
+
+5
+00:00:18.969 --> 00:00:24.192
+Every action is a server operation that checks who you are and what you may do,
+
+6
+00:00:24.192 --> 00:00:26.505
+then hands over to the case engine.
+
+7
+00:00:26.505 --> 00:00:31.728
+Background work runs as pg-boss jobs inside the same Postgres: the coordinator,
+
+8
+00:00:31.728 --> 00:00:36.091
+chat replies, vendor discovery, and a deadline sweep every minute.
+
+9
+00:00:36.091 --> 00:00:40.586
+The model is any OpenAI-compatible endpoint, here a small local one.
+
+10
+00:00:40.586 --> 00:00:45.875
+Fiber AI, email, voice and tracing are optional, and the app works without them.
+
+11
+00:00:47.575 --> 00:00:49.613
+Every write follows one pattern.
+
+12
+00:00:49.613 --> 00:00:54.136
+Lock the case row, check the transition against a shared state machine,
+
+13
+00:00:54.136 --> 00:00:58.595
+and write the change, its event and any follow-ups in one transaction.
+
+14
+00:00:58.595 --> 00:01:01.334
+Each status has an owner and a next action.
+
+15
+00:01:01.334 --> 00:01:06.685
+Idempotency keys and partial unique indexes make retries and double clicks harmless.
+
+16
+00:01:08.385 --> 00:01:10.182
+The agents are event driven.
+
+17
+00:01:10.182 --> 00:01:15.574
+When a transition matters, the same transaction writes a durable marker on the case,
+
+18
+00:01:15.574 --> 00:01:17.949
+and after the commit a job is queued.
+
+19
+00:01:17.949 --> 00:01:22.570
+The job claims that exact trigger once, runs a deterministic step first,
+
+20
+00:01:22.570 --> 00:01:26.614
+then a bounded tool loop with the model, and clears the marker.
+
+21
+00:01:26.614 --> 00:01:28.411
+Nothing runs between events.
+
+22
+00:01:28.411 --> 00:01:33.032
+If a job is lost, the minute sweep finds the marker and queues it again.
+
+23
+00:01:33.032 --> 00:01:36.755
+If a review fails, it is recorded and the manager is told.
+
+24
+00:01:38.455 --> 00:01:40.435
+The model reads and proposes.
+
+25
+00:01:40.435 --> 00:01:41.323
+Code decides.
+
+26
+00:01:41.323 --> 00:01:45.625
+Offers go only to vendors in the property's approved directory.
+
+27
+00:01:45.625 --> 00:01:49.995
+Messages to residents must pass a grounding check and a manager.
+
+28
+00:01:49.995 --> 00:01:54.911
+An escalation runs at once only if the deterministic safety rules agree.
+
+29
+00:01:54.911 --> 00:02:00.715
+And no tool can approve money, schedule a visit, close a case, or contact a business.
+
+30
+00:02:02.415 --> 00:02:08.150
+When a property has no approved vendor for a trade, the coordinator opens a discovery task.
+
+31
+00:02:08.150 --> 00:02:14.011
+It sends Fiber only the trade and the city, checks the balance, a reserve and a daily budget,
+
+32
+00:02:14.011 --> 00:02:21.825
+saves the paid response before processing, and keeps at most three businesses, each with reasons that cite only its listing.
+
+33
+00:02:21.825 --> 00:02:25.670
+A manager must verify and approve a business before any work.
+
+34
+00:02:25.670 --> 00:02:27.371
+No Fiber key was available,
+
+35
+00:02:27.371 --> 00:02:33.295
+so no live call was made: discovery was tested on Fiber-shaped fixtures, through the real SDK.
+
+36
+00:02:34.995 --> 00:02:38.858
+Follow-ups are rows, one per person, event and channel.
+
+37
+00:02:38.858 --> 00:02:40.262
+In-app is always on.
+
+38
+00:02:40.262 --> 00:02:45.881
+Email is opt-in, sent after the commit, claimed without duplicates, and retried.
+
+39
+00:02:45.881 --> 00:02:52.412
+Delivery states are honest: a local test inbox is captured, a real mail server only accepted.
+
+40
+00:02:52.412 --> 00:02:59.505
+The minute sweep enforces deadlines with bounded reminders, and resolution always needs the resident.
+
+41
+00:03:01.205 --> 00:03:08.803
+A security review found one high and eight medium issues, all fixed or documented, with regression tests.
+
+42
+00:03:08.803 --> 00:03:13.507
+TraceRoot spans cover intake, transitions, agent runs, discovery,
+
+43
+00:03:13.507 --> 00:03:17.342
+email and the sweep, with only ids, enums and counts.
+
+44
+00:03:17.342 --> 00:03:22.480
+Export was verified in version one; the new spans were not re-verified.
+
+45
+00:03:24.180 --> 00:03:28.834
+The AI evaluation uses ninety-nine intake and fourteen coordinator cases,
+
+46
+00:03:28.834 --> 00:03:31.703
+plus two held-out sets written independently.
+
+47
+00:03:31.703 --> 00:03:37.951
+On held-out phrasing, the rules alone now miss six of thirteen hard emergencies, down from eleven.
+
+48
+00:03:37.951 --> 00:03:43.753
+Run live, with the model reading the same words, the whole system escalated 11 of those 13.
+
+49
+00:03:43.753 --> 00:03:48.279
+Live, the intake agent cut missed escalations from three in ten to one,
+
+50
+00:03:48.279 --> 00:03:55.037
+and invented facts from five cases to one, but its false escalations rose from one to five of twenty-four.
+
+51
+00:03:55.037 --> 00:04:00.265
+In both versions, policy blocked every forbidden action the coordinator attempted.
+
+52
+00:04:01.965 --> 00:04:10.792
+Thirty-four unit tests, eighty-five API tests over HTTP and sixteen browser tests in real Chrome run in GitHub Actions on every push,
+
+53
+00:04:10.792 --> 00:04:15.570
+against PostgreSQL and Mailpit, along with the evaluation's safety gate.
+
+54
+00:04:17.270 --> 00:04:21.135
+And this is the actual GitHub Actions run for this release.
+
+55
+00:04:22.835 --> 00:04:28.006
+What is not done: no live Fiber call, a small local model that over-escalates,
+
+56
+00:04:28.006 --> 00:04:34.370
+rules that still miss indirect phrasing, and no real mail server, microphone test or deployment.
+
+57
+00:04:34.370 --> 00:04:36.955
+Each is documented, with the next step.
+
+58
+00:04:38.655 --> 00:04:42.944
+The model reasons, the backend decides, and people approve.
+
+59
+00:04:42.944 --> 00:04:47.670
+The code, the tests, the evaluation and the limits are on GitHub.

@@ -59,6 +59,21 @@ async function main() {
   const stream = canvas.captureStream(FPS);
   stream.addTrack(dest.stream.getAudioTracks()[0]);
   const mime = ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus"].find((t) => MediaRecorder.isTypeSupported(t));
+  // Warm the encoder up with a throwaway recording: the first encoder start in a process can take seconds, and a
+  // video track that starts late would sit seconds ahead of the audio track for the whole video.
+  {
+    const warm = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_000_000 });
+    let got = 0;
+    warm.ondataavailable = (e) => (got += e.data.size);
+    warm.start(250);
+    const until = performance.now() + 15000;
+    while (performance.now() < until && got < 50_000) {
+      draw(plan[0], 0, tl, cache);
+      await sleep(33);
+    }
+    await new Promise((r) => ((warm.onstop = r), warm.stop()));
+    status(`encoder warmed up (${got} bytes)`);
+  }
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: tl.videoBitsPerSecond ?? 4_000_000, audioBitsPerSecond: 160_000 });
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
@@ -82,7 +97,8 @@ async function main() {
     g.gain.value = b.gain;
     src.buffer = b.buf;
     src.connect(g).connect(dest);
-    src.start(t0 + b.at);
+    // Measured with av-sync-check.mjs: in Chrome's MP4 the audio track lands about 0.5 s ahead of the picture.
+    src.start(t0 + b.at + (tl.audioDelay ?? 0.5));
   }
   let ahead = 40;
   await new Promise((resolve) => {
@@ -107,6 +123,17 @@ async function main() {
   });
   await new Promise((r) => ((rec.onstop = r), rec.stop()));
   const blob = new Blob(chunks, { type: mime.split(";")[0] });
+  // How long the file really is: Chrome's recorder drops most of the still pre-roll, so captions need the real offset.
+  window.__mediaDuration = await new Promise((resolve) => {
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration)) return resolve(probe.duration);
+      probe.currentTime = 1e9;
+      probe.ontimeupdate = () => resolve(probe.duration);
+    };
+    probe.src = URL.createObjectURL(blob);
+  });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = tl.output ?? (mime.startsWith("video/mp4") ? "video.mp4" : "video.webm");

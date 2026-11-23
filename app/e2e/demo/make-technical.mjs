@@ -61,7 +61,9 @@ if (ciUrl) {
 const texts = Object.fromEntries([...narration, ...extras].map((n) => [n.id, n.text]));
 const card = (id) => ({ kind: "card", image: `tech-cards/${id}.png`, narration: id });
 items.push(card("t00"), card("t01"), card("t02"), card("t03"));
-items.push({ kind: "scene", dir: "02-manager-workspace", device: "desktop", label: "Recorded: the coordinator's tool calls", narration: "x-footage", range: { mark: "runs", before: 1.5, after: 8 } });
+// The excerpt of real product footage, when a product capture exists in <workDir>.
+if (existsSync(join(work, "02-manager-workspace", "manifest.json"))) items.push({ kind: "scene", dir: "02-manager-workspace", device: "desktop", label: "Recorded: the coordinator's tool calls", narration: "x-footage", range: { mark: "runs", before: 1.5, after: 8 } });
+else console.warn("No product capture in the work folder: the footage excerpt is left out.");
 items.push(card("t04"), card("t05"), card("t06"), card("t07"), card("t08"), card("t09"));
 if (ci) items.push({ kind: "card", image: "tech-cards/ci-raw.png", narration: "x-ci" });
 items.push(card("t10"), card("t11"));
@@ -69,7 +71,9 @@ items.push(card("t10"), card("t11"));
 const tl = buildTimeline({ work, items, durations: "tech-audio/all-durations.json", texts, output: "relay-technical-walkthrough.mp4", videoBitsPerSecond: 4_000_000, audioDir: "tech-audio" });
 writeFileSync(join(work, "tech-timeline.json"), JSON.stringify(tl));
 const plain = tl.captions.map((c) => ({ ...c, text: c.text.replace(/\|/g, "") }));
-writeFileSync(join(work, "relay-technical-walkthrough.srt"), toSrt(plain, tl.preroll));
-writeFileSync(join(work, "relay-technical-walkthrough.vtt"), toVtt(plain, tl.preroll));
 console.log(`timeline: ${tl.duration.toFixed(1)} s, ${tl.clips.length} clips, ${tl.captions.length} captions`);
 execFileSync(process.execPath, [join(here, "render.mjs"), work, "tech-timeline.json", output], { stdio: "inherit" });
+// Caption files use where the timeline really starts in the file (measured by the renderer).
+const { timelineStart } = JSON.parse(readFileSync(`${output}.json`, "utf-8"));
+writeFileSync(join(work, "relay-technical-walkthrough.srt"), toSrt(plain, timelineStart));
+writeFileSync(join(work, "relay-technical-walkthrough.vtt"), toVtt(plain, timelineStart));

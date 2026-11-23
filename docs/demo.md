@@ -11,7 +11,8 @@
    - `morgan` (manager);
    - `jo` or `ana` (contractor), at phone width.
 
-   The password for all of them is `relay-demo-2026`. Also open Mailpit at http://localhost:8025.
+   The password for all of them is `relay-demo-2026`. These are seeded accounts for local development only. Also
+   open Mailpit at http://localhost:8025.
 
 ## The story
 

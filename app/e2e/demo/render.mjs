@@ -1,7 +1,7 @@
 // Renders a timeline (built by build-*.mjs) into a video with Chrome's own MediaRecorder: no external video tools.
 // Usage (from app/e2e): node demo/render.mjs <workDir> <timeline.json> <output.mp4>
 // <workDir> holds the frames, audio and images the timeline refers to; it is served locally for the renderer page.
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,11 @@ await page.goto(`http://127.0.0.1:${port}/render.html?timeline=${encodeURICompon
 const d = await download;
 await d.saveAs(output);
 clearInterval(ticker);
-console.log(`saved ${output} (${(statSync(output).size / 1e6).toFixed(1)} MB), ${await page.title()}`);
+// The real start of the timeline in the file (what is left of the still pre-roll), for the caption files.
+const mediaDuration = await page.evaluate(() => window.__mediaDuration);
+const tl = JSON.parse(readFileSync(resolve(work, timeline), "utf-8"));
+const offset = Math.max(0, mediaDuration - tl.duration - 0.3);
+writeFileSync(`${output}.json`, JSON.stringify({ mediaDuration, timelineStart: Number(offset.toFixed(2)) }));
+console.log(`saved ${output} (${(statSync(output).size / 1e6).toFixed(1)} MB, ${mediaDuration.toFixed(1)} s, timeline starts at ${offset.toFixed(2)} s), ${await page.title()}`);
 await browser.close();
 server.close();

@@ -14,6 +14,23 @@ deterministic code decides what can happen, and every decision is recorded and l
 
 ![Manager case workspace: the report and Relay's reading, vendor discovery with source-backed checks, the AI's proposals and the follow-up log](docs/screenshots/v1.1/manager-case-discovery-desktop.png)
 
+## Demo
+
+- **[Technical walkthrough (4 min 49 s, MP4)](https://github.com/elaineh16/yc-hackathon/releases/download/relay-v1.1-preview/relay-technical-walkthrough.mp4)**
+  covers the architecture, the case engine, event-driven agents, policy, vendor discovery, follow-ups, security,
+  the AI evaluation and the tests. It is narrated and captioned.
+- **Product demo:** a resident, a manager and a contractor on one case, from report to verified fix. The scripts in
+  [`app/e2e/demo`](app/e2e/demo) record it from the running app (Chrome's own recording of real interactions; the
+  only edits are cutting the model's thinking time, marked on screen, plus captions and narration). It is not
+  recorded yet: it needs the full stack and the local model, see [the runbook](docs/demo/DEMO_RUNBOOK.md).
+
+Scripts, shot list and captions are in [docs/demo/](docs/demo/). For a live walkthrough, follow
+[docs/demo.md](docs/demo.md).
+
+| Command center | Resident, on a phone | Contractor, on a phone |
+| --- | --- | --- |
+| ![Command center](docs/screenshots/v1.1/manager-command-center-desktop.png) | ![Resident report](docs/screenshots/v1.1/resident-report-mobile.png) | ![Contractor job](docs/screenshots/v1.1/contractor-job-mobile.png) |
+
 ## What it does
 
 | Role | In Relay |
@@ -48,6 +65,36 @@ The model reasons; code holds the authority. Details: [docs/agents.md](docs/agen
 **Measured, before and after:** 99 intake and 14 coordinator cases with expected and prohibited behaviour, 30
 held-out cases in each of two independently written sets, deterministic and live-model runs. Results:
 [docs/ai-eval.md](docs/ai-eval.md).
+
+```mermaid
+flowchart LR
+  UI[React client<br/>resident · manager · contractor] -->|operations| S[Wasp server<br/>auth, roles, limits]
+  S --> E[Case engine<br/>row lock → state machine → one transaction]
+  E --> DB[(PostgreSQL<br/>Prisma + pg-boss)]
+  DB -->|durable trigger| J[Jobs: coordinator, chat turns,<br/>discovery, minute sweep]
+  J -->|bounded tool loop| LLM[LLM<br/>OpenAI-compatible]
+  J --> F[Fiber AI SDK]
+  J --> M[SMTP / Mailpit]
+  J -->|proposals| P{{Policy}} --> E
+```
+
+## Trust and reliability
+
+- **Exactly once:** every write locks the case row, checks the transition and commits in one transaction.
+  Idempotency keys and partial unique indexes make retries and double submits harmless.
+- **The AI is one bounded actor:**
+  - the state machine allows it only to offer approved vendors and to escalate;
+  - nothing else it proposes happens without policy or a person;
+  - every tool call is recorded.
+- **Nothing silent:**
+  - a lost job is re-queued by the minute sweep;
+  - a failed AI review is reported to the manager;
+  - a failed chat turn is retried and always answered;
+  - an outage (model, Fiber, SMTP) degrades to the manual path, and the case says so.
+- **Honest records:** each event shows who did it (resident, AI, system, manager, vendor), and each notification
+  its real delivery state.
+- **Reviewed:** a security review (1 high, 8 medium) with every finding fixed or documented, and regression tests;
+  see [docs/security.md](docs/security.md).
 
 ## Vendor discovery (Fiber AI)
 
@@ -103,7 +150,8 @@ wasp start                             # client http://localhost:3000, server ht
 npx tsx scripts/demo-data.ts           # optional: a populated demo (needs RELAY_TEST_HOOKS=true; resets cases)
 ```
 
-Sign in with any demo account; the password for all of them is `relay-demo-2026`.
+**Local development only:** `wasp db seed` creates these fictional demo accounts, all with the password
+`relay-demo-2026`. Never seed them into a shared or production database; real accounts come from the property.
 
 | Username | Role | Where |
 | --- | --- | --- |
@@ -131,7 +179,33 @@ no approved heating and cooling vendor on purpose, so the discovery flow can be 
 CI (`.github/workflows/ci.yml`) runs the type-check, unit tests, the deterministic eval, every API suite and the
 browser journeys against Postgres and Mailpit, with discovery on fixtures and no model.
 
-Current results, with exact commands and logs: [STATUS.md](STATUS.md).
+**Current results:**
+
+| Check | Result |
+| --- | --- |
+| Unit tests | 34 / 34 |
+| API tests over HTTP | 85 / 85 |
+| Browser tests in Chrome | 16 / 16 |
+| GitHub Actions | green |
+| Held-out emergencies escalated, live, by the whole system (out of sample) | 11 / 13 (the rules alone: 7) |
+| Live coordinator: forbidden attempts that policy let through | 0 |
+
+Exact commands, logs and every metric: [STATUS.md](STATUS.md) and [docs/ai-eval.md](docs/ai-eval.md).
+
+## Known limitations
+
+- **Fiber:** no live Fiber call has been made (no key was available). Discovery runs the real SDK path on
+  Fiber-shaped fixtures.
+- **The model:** the default is a small local model on CPU. It over-escalates some ordinary reports (5 of 24 in the
+  live evaluation) and is slow.
+- **Out-of-sample misses:** two of 13 held-out emergencies were missed out of sample (see the evaluation).
+- **Not exercised:**
+  - a real SMTP server;
+  - voice with a live microphone;
+  - a deployment.
+- **Not built:** password reset and account management.
+
+Details: [STATUS.md](STATUS.md).
 
 ## Documentation
 
@@ -143,7 +217,7 @@ Current results, with exact commands and logs: [STATUS.md](STATUS.md).
 - [AI evaluation](docs/ai-eval.md)
 - [Security review](docs/security.md)
 - [Feature matrix](docs/feature-matrix.md)
-- [Demo walkthrough](docs/demo.md)
+- [Demo walkthrough](docs/demo.md), and the [demo videos: scripts, shot list, runbook](docs/demo/)
 - [Status](STATUS.md)
 - Screenshots: [desktop, tablet and phone](docs/screenshots/v1.1/)
 - [Hackathon archive](docs/archive/): the original YC × ElevenLabs hackathon documents. The hackathon build is

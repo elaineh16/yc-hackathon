@@ -23,7 +23,12 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 await page.goto(`http://127.0.0.1:${server.address().port}/`);
-await page.evaluate(() => document.getElementById("v").play());
+// PLAYBACK_RATE (e.g. 4) reaches late moments faster; media time stays exact at any rate.
+await page.evaluate((rate) => {
+  const v = document.getElementById("v");
+  v.playbackRate = rate;
+  return v.play();
+}, Number(process.env.PLAYBACK_RATE ?? 1));
 for (const t of times.map(Number)) {
   await page.waitForFunction((s) => document.getElementById("v").currentTime >= s, t, { timeout: 15 * 60_000, polling: 20 });
   const at = await page.evaluate(() => document.getElementById("v").currentTime);

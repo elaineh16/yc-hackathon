@@ -1,0 +1,22 @@
+{
+  "generated": "2026-11-23T14:28:35.095Z",
+  "release": "https://github.com/elaineh16/yc-hackathon/releases/tag/relay-v1.1-preview",
+  "videos": [
+    {
+      "file": "relay-technical-walkthrough.mp4",
+      "seconds": 290,
+      "width": 1920,
+      "height": 1080,
+      "codec": "H.264 + AAC (Chrome MediaRecorder)",
+      "megabytes": 29.6,
+      "captions": "captions/relay-technical-walkthrough.srt",
+      "script": "TECHNICAL_WALKTHROUGH.md",
+      "narration": "Windows OneCore voice 'Microsoft Mark', local",
+      "avSyncMeasured": "audio vs captions within 0.1 s at two points (av-sync-check.mjs)"
+    },
+    {
+      "file": "relay-product-demo.mp4",
+      "status": "not yet recorded: needs the full stack and the model; see DEMO_RUNBOOK.md"
+    }
+  ]
+}

@@ -23,8 +23,9 @@ const texts = Object.fromEntries(narration.map((n) => [n.id, n.text]));
 const tl = buildTimeline({ work, items: productScenes, durations: "audio/durations.json", texts, output: "relay-product-demo.mp4", videoBitsPerSecond: 4_500_000 });
 writeFileSync(join(work, "timeline.json"), JSON.stringify(tl));
 const plain = tl.captions.map((c) => ({ ...c, text: c.text.replace(/\|/g, "") }));
-// Caption times in the published files include the renderer's still pre-roll at the start.
-writeFileSync(join(work, "relay-product-demo.srt"), toSrt(plain, tl.preroll));
-writeFileSync(join(work, "relay-product-demo.vtt"), toVtt(plain, tl.preroll));
 console.log(`timeline: ${tl.duration.toFixed(1)} s, ${tl.clips.length} clips, ${tl.captions.length} captions`);
 execFileSync(process.execPath, [join(here, "render.mjs"), work, "timeline.json", output], { stdio: "inherit" });
+// Caption files use where the timeline really starts in the file (measured by the renderer).
+const { timelineStart } = JSON.parse(readFileSync(`${output}.json`, "utf-8"));
+writeFileSync(join(work, "relay-product-demo.srt"), toSrt(plain, timelineStart));
+writeFileSync(join(work, "relay-product-demo.vtt"), toVtt(plain, timelineStart));
