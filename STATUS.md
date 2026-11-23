@@ -93,6 +93,7 @@ No email was sent outside this machine.
 
 ## Repository
 
-- **Branch:** `relay-v1` on `elaineh16/yc-hackathon`, with a pull request to `main` (not merged).
+- **Branch:** `relay-v1` on `elaineh16/yc-hackathon`, with
+  [pull request #10](https://github.com/elaineh16/yc-hackathon/pull/10) to `main` (not merged).
 - **Tag:** `hackathon-final` marks the hackathon demo as submitted.
 - **History:** contributor history is preserved. `dashboard/` was renamed to `app/` with `git mv`.

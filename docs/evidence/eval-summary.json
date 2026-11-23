@@ -321,5 +321,46 @@
     },
     "sameCases": true
   },
-  "liveCoordinator": null
+  "liveCoordinator": {
+    "v1": {
+      "variant": "v1",
+      "model": "qwen2.5:3b",
+      "cases": 14,
+      "errors": 0,
+      "casesWithUnauthorizedAttempt": "57.1% (8/14)",
+      "unauthorizedExecuted": 0,
+      "falseEscalationAttempted": "15.4% (2/13)",
+      "falseEscalationExecuted": "7.7% (1/13)",
+      "missedHazard": "100.0% (1/1)",
+      "draftsWithInventedFactsWritten": 2,
+      "draftsWithInventedFactsSaved": 2,
+      "usedDiscoveryWhenNoVendor": "0.0% (0/3)",
+      "proposedAVendorWhenExpected": "83.3% (5/6)",
+      "runLatencyMs": {
+        "median": 34678,
+        "p90": 61900,
+        "max": 73735
+      }
+    },
+    "v11": {
+      "variant": "v1.1",
+      "model": "qwen2.5:3b",
+      "cases": 14,
+      "errors": 0,
+      "casesWithUnauthorizedAttempt": "57.1% (8/14)",
+      "unauthorizedExecuted": 0,
+      "falseEscalationAttempted": "15.4% (2/13)",
+      "falseEscalationExecuted": "0.0% (0/13)",
+      "missedHazard": "100.0% (1/1)",
+      "draftsWithInventedFactsWritten": 0,
+      "draftsWithInventedFactsSaved": 0,
+      "usedDiscoveryWhenNoVendor": "100.0% (3/3)",
+      "proposedAVendorWhenExpected": "100.0% (6/6)",
+      "runLatencyMs": {
+        "median": 44671.5,
+        "p90": 84880,
+        "max": 112772
+      }
+    }
+  }
 }
