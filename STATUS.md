@@ -15,7 +15,7 @@ are in [docs/evidence/](docs/evidence/).
 | Demo videos | `app/e2e/demo` (see [docs/demo/DEMO_RUNBOOK.md](docs/demo/DEMO_RUNBOOK.md)) | **Product demo** "Relay: from request to resolution": 5:26, 98% real app footage, live Fiber search, reviewed frame by frame while playing; narration onsets within 0.04 s of the timeline. **Technical walkthrough**: 4:49, audio and captions within 0.1 s | [docs/demo/](docs/demo/) |
 | AI evaluation, deterministic, with the safety gate | `npx tsx tests/eval/deterministic.ts --gate` | **gate passes** | [eval-deterministic.json](docs/evidence/eval-deterministic.json) |
 | AI evaluation, live model | `tests/eval/live.ts`, `tests/eval/live-coordinator.ts` | see [docs/ai-eval.md](docs/ai-eval.md) | [eval-summary.json](docs/evidence/eval-summary.json) |
-| GitHub Actions (`.github/workflows/ci.yml`) | type-check, unit, deterministic eval gate, every API suite, browser journeys, on Postgres and Mailpit with no model | **green** ([run 45162425486](https://github.com/elaineh16/yc-hackathon/actions/runs/45162425486)) | |
+| GitHub Actions (`.github/workflows/ci.yml`) | type-check, unit, deterministic eval gate, every API suite, browser journeys, on Postgres and Mailpit with no model | **green** on `1f05b5c` ([push run 45280813408](https://github.com/elaineh16/yc-hackathon/actions/runs/45280813408), [PR run 45280829386](https://github.com/elaineh16/yc-hackathon/actions/runs/45280829386)) | |
 | Screenshots, desktop, tablet and phone | `SCREENS=1 npx playwright test screens` | 28 | [docs/screenshots/v1.1/](docs/screenshots/v1.1/) |
 
 The API and browser suites need the dev server running with `RELAY_TEST_HOOKS=true` and `FIBER_MODE=fixture`, and

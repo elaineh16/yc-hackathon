@@ -58,7 +58,7 @@ More, at desktop, tablet and phone sizes: [docs/screenshots/v1.1/](docs/screensh
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TD
   R([Resident reports<br/>chat · voice · form]) --> C[Case filed by the server<br/>safety rules can only raise severity]
   C --> H{Hazard or lockout?}
   H -->|yes| P([A person handles it<br/>escalation or identity check])
@@ -155,7 +155,7 @@ Read more: [architecture](docs/architecture.md) · [workflow and states](docs/wo
 | API tests over HTTP | 86 / 86 |
 | Browser journeys in Chrome (Playwright) | 16 / 16 |
 | Agent tests on the real model (`qwen2.5:3b`, local) | 2 / 2 |
-| GitHub Actions | CI_RESULT |
+| GitHub Actions: type-check, unit, safety gate, API suites, browser journeys | green ([runs on `relay-v1`](https://github.com/elaineh16/yc-hackathon/actions?query=branch%3Arelay-v1)) |
 | Live Fiber AI search through the manager interface | 20 places, 3 kept, **2 credits** charged ([evidence](docs/evidence/fiber-live-ui-search.json)) |
 | Held-out emergencies escalated by the whole system, live model (out of sample) | 11 of 13 (the rules alone: 7) |
 | Live coordinator: forbidden actions the model attempted that policy let through | 0 |
