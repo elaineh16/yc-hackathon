@@ -1,0 +1,471 @@
+datasource db {
+  provider = "postgresql"
+  // Wasp requires that the url is set to the DATABASE_URL environment variable.
+  url      = env("DATABASE_URL")
+}
+
+// Wasp requires the `prisma-client-js` generator to be present.
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ───────────────────────── people and places ─────────────────────────
+
+enum Role {
+  RESIDENT
+  MANAGER
+  CONTRACTOR
+}
+
+// Wasp adds the auth tables (Auth, AuthIdentity, Session) and links them to this model.
+model User {
+  id            Int                  @id @default(autoincrement())
+  createdAt     DateTime             @default(now())
+  role          Role                 @default(RESIDENT)
+  displayName   String
+  // Contractors act on behalf of exactly one vendor.
+  vendorId      String?
+  vendor        Vendor?              @relation(fields: [vendorId], references: [id])
+  memberships   PropertyMembership[]
+  residencies   Residency[]
+  reportedCases Case[]               @relation("Reporter")
+  notifications Notification[]
+  conversations IntakeConversation[]
+}
+
+model Property {
+  id                            String               @id @default(uuid())
+  createdAt                     DateTime             @default(now())
+  name                          String
+  address                       String
+  // Approval policy: a fixed estimate above this needs a manager's decision. An inspection-only response always does.
+  approvalThresholdCents        Int                  @default(25000)
+  // A vendor must answer an offer within this window, or the offer expires and the case returns to the manager.
+  vendorResponseMinutes         Int                  @default(1440)
+  // After the contractor reports completion: how often the resident is reminded, and when a manager may close unverified.
+  verificationReminderMinutes   Int                  @default(1440)
+  verificationCloseAfterMinutes Int                  @default(4320)
+  emergencyInstructions         String               @default("If anyone is in danger, call 911 first.")
+  // Building knowledge the agents can look up (shut-off valves, laundry room, access rules...). Plain text, edited in Settings.
+  knowledge                     String               @default("")
+  // When on, Relay's coordinator may offer routine jobs to the vendor it recommends without waiting for a manager.
+  // Spending decisions, cancellations and closing are never automatic.
+  autopilotRoutine              Boolean              @default(false)
+  units                         Unit[]
+  memberships                   PropertyMembership[]
+  cases                         Case[]
+}
+
+// Which managers run which properties.
+model PropertyMembership {
+  id         String   @id @default(uuid())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+}
+
+model Unit {
+  id          String      @id @default(uuid())
+  propertyId  String
+  property    Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  label       String
+  residencies Residency[]
+  cases       Case[]
+
+  @@unique([propertyId, label])
+}
+
+// Which residents live in which units.
+model Residency {
+  id     String  @id @default(uuid())
+  userId Int
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unitId String
+  unit   Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  active Boolean @default(true)
+
+  @@unique([userId, unitId])
+}
+
+enum Category {
+  PLUMBING
+  APPLIANCE
+  HVAC
+  OTHER
+}
+
+model Vendor {
+  id          String             @id @default(uuid())
+  createdAt   DateTime           @default(now())
+  name        String             @unique
+  trades      Category[]
+  phone       String?
+  email       String?
+  // Only approved vendors can be offered work.
+  approved    Boolean            @default(true)
+  notes       String?
+  users       User[]
+  assignments VendorAssignment[]
+  slots       AppointmentSlot[]
+}
+
+// ───────────────────────── cases ─────────────────────────
+
+enum Severity {
+  EMERGENCY
+  URGENT
+  ROUTINE
+}
+
+enum CaseStatus {
+  NEW
+  TRIAGED
+  AWAITING_ASSIGNMENT
+  AWAITING_VENDOR
+  AWAITING_APPROVAL
+  SCHEDULING
+  SCHEDULED
+  IN_PROGRESS
+  AWAITING_VERIFICATION
+  RESOLVED
+  ESCALATED
+  CANCELLED
+  REOPENED
+}
+
+// Who holds the next action. Stored with the status so every case always has an owner.
+enum Holder {
+  SYSTEM
+  RESIDENT
+  MANAGER
+  CONTRACTOR
+  NONE
+}
+
+enum IntakeChannel {
+  // The fallback form (works with no AI at all).
+  TEXT
+  // A typed conversation with Relay's intake agent.
+  CHAT
+  // A spoken conversation with the ElevenLabs voice agent.
+  VOICE
+}
+
+enum Resolution {
+  VERIFIED_BY_RESIDENT
+  CLOSED_UNVERIFIED
+}
+
+model Case {
+  id                      String             @id @default(uuid())
+  number                  Int                @unique @default(autoincrement())
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  propertyId              String
+  property                Property           @relation(fields: [propertyId], references: [id])
+  unitId                  String
+  unit                    Unit               @relation(fields: [unitId], references: [id])
+  residentId              Int
+  resident                User               @relation("Reporter", fields: [residentId], references: [id])
+  channel                 IntakeChannel
+  // Idempotency: a retried submission with the same key returns the same case.
+  clientRequestId         String
+  title                   String
+  // The resident's own words. Never rewritten.
+  description             String
+  category                Category
+  severity                Severity
+  emergency               Boolean            @default(false)
+  // True when a person must classify or route it (unsupported category or uncertain triage).
+  needsReview             Boolean            @default(false)
+  // RULES | VOICE_AGENT | MANAGER: who produced the classification.
+  triageSource            String
+  triageReasons           String[]
+  summary                 String
+  // Category-specific answers (see src/shared/intake.ts).
+  details                 Json
+  permissionToEnter       Boolean            @default(false)
+  accessNotes             String?
+  status                  CaseStatus         @default(NEW)
+  holder                  Holder             @default(SYSTEM)
+  nextAction              String             @default("")
+  nextActionDueAt         DateTime?
+  statusChangedAt         DateTime           @default(now())
+  verificationRequestedAt DateTime?
+  verificationReminders   Int                @default(0)
+  resolvedAt              DateTime?
+  resolution              Resolution?
+  cancelledAt             DateTime?
+  cancelReason            String?
+  // The coordinator's latest reading of the case, in its own words (shown to managers, labelled as AI).
+  aiAssessment            String?
+  aiAssessedAt            DateTime?
+  // Durable "the coordinator should look at this" marker, set in the same transaction as the triggering event.
+  // Cleared when a coordinator run finishes; the minute sweep re-queues anything left set (crash recovery).
+  agentPendingSince       DateTime?
+  agentPendingTrigger     String?
+  agentPendingEventId     Int?
+  assignments             VendorAssignment[]
+  approvals               SpendApproval[]
+  slots                   AppointmentSlot[]
+  events                  CaseEvent[]
+  notifications           Notification[]
+  agentRuns               AgentRun[]
+  proposals               AgentProposal[]
+  conversation            IntakeConversation?
+
+  @@unique([residentId, clientRequestId])
+  @@index([propertyId, status])
+  @@index([holder, status])
+  @@index([agentPendingSince])
+}
+
+// ───────────────────────── agents ─────────────────────────
+
+enum ConversationStatus {
+  OPEN
+  SUBMITTED
+  ABANDONED
+}
+
+// A resident's conversation with the intake agent. Persisted, so it survives reloads and server restarts.
+model IntakeConversation {
+  id              String             @id @default(uuid())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  residentId      Int
+  resident        User               @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  unitId          String
+  status          ConversationStatus @default(OPEN)
+  // [{ role: "resident" | "relay", text, at }]: what both sides actually said.
+  messages        Json               @default("[]")
+  // What the agent has learned so far, as structured facts it recorded with the note_facts tool.
+  facts           Json               @default("{}")
+  // Idempotency key for the submission, so a retried submit returns the same case.
+  clientRequestId String             @default(uuid())
+  caseId          String?            @unique
+  case            Case?              @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  runs            AgentRun[]
+
+  @@index([residentId, status])
+}
+
+enum AgentKind {
+  INTAKE
+  COORDINATOR
+}
+
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+// One reasoning pass by an agent: what triggered it, which model, every tool it called with the result, and how it ended.
+model AgentRun {
+  id             String              @id @default(uuid())
+  createdAt      DateTime            @default(now())
+  finishedAt     DateTime?
+  kind           AgentKind
+  caseId         String?
+  case           Case?               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   IntakeConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  trigger        String
+  // Coordinator runs: the case event that woke it. One run per (case, trigger, event), so a retried job is a no-op.
+  triggerKey     String?             @unique
+  model          String
+  status         AgentRunStatus      @default(RUNNING)
+  // [{ tool, args, ok, result }] in the order the agent called them.
+  steps          Json                @default("[]")
+  finalText      String?
+  error          String?
+  durationMs     Int?
+  proposals      AgentProposal[]
+
+  @@index([caseId, createdAt])
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXECUTED
+  FAILED
+  SUPERSEDED
+}
+
+// Something the coordinator wants done. Deterministic policy decides whether it runs straight away or waits for a manager.
+model AgentProposal {
+  id          String         @id @default(uuid())
+  createdAt   DateTime       @default(now())
+  caseId      String
+  case        Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  runId       String
+  run         AgentRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  // ASSIGN_VENDOR | MESSAGE_RESIDENT | ESCALATE
+  kind        String
+  payload     Json
+  rationale   String
+  status      ProposalStatus @default(PENDING)
+  // Why policy let it run automatically or held it for a person.
+  policyNote  String
+  decidedById Int?
+  decidedAt   DateTime?
+  outcome     String?
+
+  @@index([caseId, status])
+}
+
+enum AssignmentStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum EstimateType {
+  FIXED
+  INSPECTION_REQUIRED
+}
+
+// One offer of a case to a vendor, and everything that vendor did with it.
+// A raw-SQL partial unique index allows at most one live (OFFERED or ACCEPTED) assignment per case.
+model VendorAssignment {
+  id              String            @id @default(uuid())
+  caseId          String
+  case            Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  vendorId        String
+  vendor          Vendor            @relation(fields: [vendorId], references: [id])
+  status          AssignmentStatus  @default(OFFERED)
+  offeredById     Int
+  offeredAt       DateTime          @default(now())
+  respondByAt     DateTime
+  noteToVendor    String?
+  respondedAt     DateTime?
+  respondedById   Int?
+  declineReason   String?
+  estimateType    EstimateType?
+  estimateCents   Int?
+  estimateNotes   String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  completionNotes String?
+  finalCostCents  Int?
+  approval        SpendApproval?
+  slots           AppointmentSlot[]
+
+  @@index([vendorId, status])
+  @@index([status, respondByAt])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+  VOID
+}
+
+// The spending decision for one accepted assignment. Keeps the policy that applied at the time.
+model SpendApproval {
+  id             String           @id @default(uuid())
+  caseId         String
+  case           Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  assignmentId   String           @unique
+  assignment     VendorAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  status         ApprovalStatus
+  amountCents    Int?
+  thresholdCents Int
+  capCents       Int?
+  requestedAt    DateTime         @default(now())
+  decidedAt      DateTime?
+  decidedById    Int?
+  note           String?
+}
+
+enum SlotStatus {
+  PROPOSED
+  ACCEPTED
+  CONFIRMED
+  DECLINED
+  WITHDRAWN
+  SUPERSEDED
+  CANCELLED
+  UNAVAILABLE
+}
+
+// A visit window proposed by the contractor. PROPOSED -> ACCEPTED (resident agreed, spend not yet approved)
+// -> CONFIRMED (everyone required has agreed and the vendor has no clash).
+model AppointmentSlot {
+  id                 String           @id @default(uuid())
+  caseId             String
+  case               Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  assignmentId       String
+  assignment         VendorAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  vendorId           String
+  vendor             Vendor           @relation(fields: [vendorId], references: [id])
+  startAt            DateTime
+  endAt              DateTime
+  status             SlotStatus       @default(PROPOSED)
+  proposedById       Int
+  proposedAt         DateTime         @default(now())
+  residentAnsweredAt DateTime?
+  confirmedAt        DateTime?
+
+  @@index([vendorId, status, startAt])
+  @@index([caseId, status])
+}
+
+enum Audience {
+  EVERYONE
+  MANAGEMENT
+  VENDOR
+}
+
+// Append-only history. Every state change and every action writes one row in the same transaction.
+model CaseEvent {
+  id          Int         @id @default(autoincrement())
+  caseId      String
+  case        Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  actorUserId Int?
+  // RESIDENT | MANAGER | CONTRACTOR | SYSTEM
+  actorRole   String
+  actorName   String
+  type        String
+  fromStatus  CaseStatus?
+  toStatus    CaseStatus?
+  message     String
+  // EVERYONE: all parties. MANAGEMENT: managers only. VENDOR: managers and the vendor in vendorId.
+  audience    Audience    @default(EVERYONE)
+  vendorId    String?
+  data        Json?
+
+  @@index([caseId, id])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseId    String?
+  case      Case?     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  kind      String
+  title     String
+  body      String
+  readAt    DateTime?
+  // One notification per recipient per event, even if the action is retried.
+  dedupeKey String    @unique
+
+  @@index([userId, readAt])
+}

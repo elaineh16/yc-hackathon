@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* Relay design tokens.
+   Neutral, cool paper and ink. One signature accent: hi-vis orange, used only to mark "your move".
+   Status colours carry meaning and are never decoration. */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-paper: #f4f5f3;
+  --color-surface: #ffffff;
+  --color-sunk: #eceee9;
+  --color-line: #dde1dc;
+  --color-line-strong: #c6ccc5;
+  --color-ink: #18212b;
+  --color-ink-2: #2c3742;
+  --color-muted: #5a6570;
+  --color-faint: #8a939b;
+
+  --color-move: #e8590c; /* your move */
+  --color-move-soft: #fff1e8;
+
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-warn: #a15c07;
+  --color-warn-soft: #fdf3e2;
+  --color-info: #1d5fa6;
+  --color-info-soft: #e9f1fb;
+  --color-ok: #23753a;
+  --color-ok-soft: #e7f4ea;
+  --color-ai: #3a4a8c;
+  --color-ai-soft: #eef0f8;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper font-sans text-[15px] leading-relaxed text-ink antialiased;
+    font-feature-settings: "tnum" 0;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ink;
+  }
+  ::selection {
+    @apply bg-move-soft;
+  }
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
