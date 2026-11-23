@@ -24,6 +24,8 @@ stateDiagram-v2
   REOPENED --> AWAITING_VENDOR: assign again
   ESCALATED --> AWAITING_ASSIGNMENT: manager resumes
   ESCALATED --> AWAITING_VERIFICATION: handled outside Relay
+  TRIAGED --> AWAITING_VERIFICATION: handled directly (lockout, noise)
+  AWAITING_ASSIGNMENT --> AWAITING_VERIFICATION: handled directly (noise)
   RESOLVED --> [*]
   CANCELLED --> [*]
 ```
@@ -36,7 +38,7 @@ Most open states can also move to `ESCALATED` (a manager or the coordinator) and
 | --- | --- | --- |
 | NEW | Relay | Triage the report |
 | TRIAGED | Manager | Review the report and route it |
-| AWAITING_ASSIGNMENT | Manager | Assign an approved vendor |
+| AWAITING_ASSIGNMENT | Manager | Assign an approved vendor. For a noise case: handle it directly. With no approved vendor for the trade: review the businesses vendor discovery found, or add a vendor |
 | AWAITING_VENDOR | Contractor | Respond to the job offer (deadline set by the property) |
 | AWAITING_APPROVAL | Manager | Approve or reject the estimate |
 | SCHEDULING | Resident when there are times to choose, otherwise contractor | Choose a visit time / propose visit times |
@@ -47,16 +49,27 @@ Most open states can also move to `ESCALATED` (a manager or the coordinator) and
 | REOPENED | Manager | Review and assign a vendor again |
 | RESOLVED, CANCELLED | No one | |
 
+## Categories and who handles them
+
+| Category | Path |
+| --- | --- |
+| Plumbing, appliance, heating and cooling, electrical | A vendor approved at the property for the trade. If there is none, vendor discovery ([fiber.md](fiber.md)) |
+| Locks and access | A broken lock or fob goes to a vendor (a locksmith). A lockout goes to a person: staff verify identity and let the resident in (handled directly). Codes are never shared. Someone at risk inside means an emergency |
+| Elevator | An elevator vendor. One that stopped between floors goes to a person first (whether to take it out of service). Someone trapped means an emergency. Someone with limited mobility depending on it goes to a person |
+| Noise or a neighbour | The manager handles it directly; no vendor can be offered it. Sounds of violence mean an emergency (call 911) |
+| Something else | A person classifies and routes it |
+
 ## Approvals and scheduling
 
 - A contractor accepts with either a fixed estimate or "inspection first" (optionally with a fee), plus one to five visit windows.
 - A fixed estimate at or below the property's approval threshold is approved by policy and recorded as such. A higher estimate, or any inspection-first response, waits for a manager, who approves a maximum (not below the estimate) or rejects it. A rejection releases the vendor and returns the case to assignment.
 - The resident can pick a window while the approval is pending. The visit is confirmed only when both conditions hold: the spending is settled and the resident has chosen. Confirmation re-checks, under a per-vendor lock, that neither the vendor nor the unit already has a confirmed visit at an overlapping time. On a clash the window is marked unavailable and the contractor is asked for new times.
 - A contractor's final cost above the approved maximum is flagged to managers.
+- Mid-job, a contractor can ask for more money (an amount and the reason). The case does not move. The manager approves (the maximum rises by that amount) or declines. Nothing above the approved maximum is authorised meanwhile, and the AI can summarise the request but never decide it.
 
 ## Verification and closing
 
-Completing work only hands the case to the resident; it never resolves it. The resident confirms the fix (resolved) or says it is not fixed (reopened). The minute sweep reminds them on the property's schedule. A manager may close a case as unverified only after the property's waiting period, and the history records that it was closed without confirmation.
+Completing work only hands the case to the resident; it never resolves it. The resident answers "Yes, resolved" or "No, still having problems" (reopened, and the manager is told). The minute sweep reminds them on the property's schedule, at most `maxReminders` times ([notifications.md](notifications.md)). A manager may close a case as unverified only after the property's waiting period, and the history records that it was closed without confirmation.
 
 ## History
 

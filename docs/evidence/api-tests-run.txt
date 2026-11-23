@@ -1,51 +1,143 @@
-# API tests, 2026-11-22 23:30:14 EST
-$ npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts
+# API tests, 2026-11-23 05:35:35 EST
+$ npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts tests/api/discovery.test.ts tests/api/followups.test.ts tests/api/v11.test.ts tests/api/audit.test.ts
+▶ H1: a vendor shared with another property cannot be changed from one of them
+  ✔ a vendor also used at Birch House is read-only for Maple Court's manager (385.752527ms)
+  ✔ a vendor used only at the manager's own properties can still be edited (128.58286ms)
+✔ H1: a vendor shared with another property cannot be changed from one of them (1519.553268ms)
+▶ M2: resuming an escalation ends the emergency
+  ✔ after a manager resumes it, the case is no longer an emergency and can be routed normally (677.490434ms)
+✔ M2: resuming an escalation ends the emergency (678.863052ms)
+▶ M5: what a contractor sees
+  ✔ entry instructions are shown only after the vendor accepts the job (694.320327ms)
+  ✔ a vendor whose job is done does not see the next vendor's work on the reopened case (2312.440446ms)
+✔ M5: what a contractor sees (3008.667614ms)
+▶ M6: limits on paid and abusable paths
+  ✔ a resident who sends too many reports in an hour is asked to wait (675.884498ms)
+  ✔ repeated failed sign-ins lock the username for a while, even with the right password (450.990458ms)
+✔ M6: limits on paid and abusable paths (1128.762826ms)
+▶ M7: an intake turn that fails is retried and the resident gets a reply
+  ✔ a failure that is not the model's is retried by the job, and the retry answers (11535.399253ms)
+✔ M7: an intake turn that fails is retried and the resident gets a reply (11536.000995ms)
+▶ discovery is only for missing coverage
+  ✔ a vendor exists: no discovery, and asking for one is refused (1413.98684ms)
+✔ discovery is only for missing coverage (1708.310593ms)
+▶ no vendor: search, check, review, onboard, resume
+  ✔ no approved heating and cooling vendor at Maple Court: a discovery runs and keeps source-backed candidates (4329.348406ms)
+  ✔ wrong category and non-businesses are filtered with the reason; duplicates of a known vendor are flagged (0.674992ms)
+  ✔ the resident never sees discovery; managers are told and the next step says what to do (77.549442ms)
+  ✔ a cached result is reused for the next case: no new call (1857.27116ms)
+  ✔ a forced new search keeps more candidates, flags wrong area and missing contacts, and never duplicates rows (1776.263278ms)
+  ✔ an unverified candidate cannot be dispatched or onboarded (116.084391ms)
+  ✔ reject needs a reason and can be reopened; verify needs a note (131.680367ms)
+  ✔ onboarding a verified business approves it here and the waiting case resumes (222.451774ms)
+  ✔ a duplicate of an existing vendor approves that vendor here instead of creating another (118.338376ms)
+  ✔ missing contact details must be supplied before onboarding (110.328538ms)
+✔ no vendor: search, check, review, onboard, resume (8742.608438ms)
+▶ failures never block the case
+  ✔ no results: the case continues and a manager can add a vendor by hand (7434.221591ms)
+  ✔ the API is down: three attempts, then a clear failure, and the case is still workable (15839.751624ms)
+  ✔ credits exhausted: no search is made when the balance is empty; a 402 mid-search fails without retrying (5987.535395ms)
+  ✔ no key configured: the search is skipped, managers are told, and the case is not blocked (2177.526072ms)
+✔ failures never block the case (31546.776614ms)
+▶ concurrency and interruption
+  ✔ concurrent requests create one discovery and one provider call (2776.051454ms)
+  ✔ a run interrupted after the paid call resumes from the saved response, without calling again (11094.863721ms)
+  ✔ a run interrupted on every attempt fails clearly after the last one (5807.639838ms)
+✔ concurrency and interruption (19888.665288ms)
+▶ A and recipients: the report is acknowledged to the right people only
+  ✔ the resident gets an in-app and an email acknowledgement; the manager is told; nobody else (269.721377ms)
+  ✔ the email links to the case (sign-in required) and carries minimal private information (13.328986ms)
+  ✔ each delivery is recorded as what it really was (12.320925ms)
+  ✔ people who did not opt in, or have no address, are skipped with the reason (109.366795ms)
+✔ A and recipients: the report is acknowledged to the right people only (739.779932ms)
+▶ B, C, D: actions with deadlines, reminders, and what happens when nobody answers
+  ✔ an offer names who must act, by when, and what happens otherwise; acting acknowledges it (336.546529ms)
+  ✔ C: the resident is asked to choose a time, reminded at most twice, then the manager is told once (393.9844ms)
+  ✔ declining every time tells the contractor to propose new ones (130.268316ms)
+  ✔ D: a confirmed visit gets one reminder ahead of time, to the resident and the contractor (605.511268ms)
+✔ B, C, D: actions with deadlines, reminders, and what happens when nobody answers (1571.054026ms)
+▶ E and F: completion asks the resident, unresolved reopens, silence is bounded
+  ✔ E: the resident is asked whether it is fixed; no reopens it and the manager is told (1130.642448ms)
+  ✔ F: verification reminders stop at the limit; the manager is told once; sweeping again changes nothing (1579.943696ms)
+✔ E and F: completion asks the resident, unresolved reopens, silence is bounded (2988.568081ms)
+▶ email delivery: duplicates, outages, retries and missing configuration
+  ✔ concurrent delivery passes send each email once (318.043648ms)
+  ✔ an SMTP outage: retried with backoff, recorded as failed after three attempts, nothing lost (705.043847ms)
+  ✔ no email configuration: email rows are skipped with the reason and in-app still works (242.366092ms)
+✔ email delivery: duplicates, outages, retries and missing configuration (1565.080287ms)
+▶ G and emergencies: Relay says when it cannot proceed, and unacknowledged emergencies are raised once more
+  ✔ an unacknowledged emergency alert is raised again once, then not again (479.579031ms)
+  ✔ when the AI cannot review a case, the manager is told what is needed, once per trigger (16103.172657ms)
+✔ G and emergencies: Relay says when it cannot proceed, and unacknowledged emergencies are raised once more (16773.787671ms)
 ▶ authorization
-  ✔ no session: every operation is refused (16.571364ms)
-  ✔ roles: residents cannot manage, contractors cannot report, managers cannot act as vendors (239.326663ms)
-  ✔ a resident cannot read or act on another resident's case (131.943526ms)
-  ✔ a contractor cannot see or answer another contractor's job (127.763296ms)
-  ✔ a manager cannot see another property's cases (63.908068ms)
-  ✔ self sign-up is blocked (26.398341ms)
-✔ authorization (969.854182ms)
+  ✔ no session: every operation is refused (11.414604ms)
+  ✔ roles: residents cannot manage, contractors cannot report, managers cannot act as vendors (139.365923ms)
+  ✔ a resident cannot read or act on another resident's case (100.135746ms)
+  ✔ a contractor cannot see or answer another contractor's job (163.899606ms)
+  ✔ a manager cannot see another property's cases (79.454912ms)
+  ✔ self sign-up is blocked (39.734717ms)
+✔ authorization (873.233346ms)
 ▶ workflow rules
-  ✔ missing manager approval: work cannot be scheduled or started (238.542039ms)
-  ✔ contractor decline returns the case to the manager, and the vendor loses access (225.361295ms)
-  ✔ missing contractor response: the offer expires through the durable sweep, not a timer (271.978545ms)
-  ✔ invalid transitions are refused with 409 (136.033203ms)
-  ✔ appointment conflict: a vendor cannot be booked twice for the same time (427.099363ms)
-  ✔ cancellation after an offer withdraws it from the vendor (246.036581ms)
-  ✔ repeated and concurrent requests do not double up (352.144571ms)
-  ✔ completion without the resident's verification does not resolve the case (552.441817ms)
-✔ workflow rules (2451.569804ms)
+  ✔ missing manager approval: work cannot be scheduled or started (278.790534ms)
+  ✔ contractor decline returns the case to the manager, and the vendor loses access (297.746133ms)
+  ✔ missing contractor response: the offer expires through the durable sweep, not a timer (1712.600349ms)
+  ✔ invalid transitions are refused with 409 (392.570016ms)
+  ✔ appointment conflict: a vendor cannot be booked twice for the same time (1082.679428ms)
+  ✔ cancellation after an offer withdraws it from the vendor (464.462064ms)
+  ✔ repeated and concurrent requests do not double up (632.207259ms)
+  ✔ completion without the resident's verification does not resolve the case (2389.201702ms)
+✔ workflow rules (7253.22025ms)
 ▶ safety and failure
-  ✔ emergency escalation: a gas smell is escalated and routine dispatch is blocked (132.994801ms)
-  ✔ an unsupported category is saved and routed to a person (48.757704ms)
-  ✔ a failed database write saves nothing and a retry succeeds (110.393034ms)
-  ✔ voice intake is refused cleanly when the voice service rejects the credentials (405.506347ms)
-✔ safety and failure (698.784627ms)
+  ✔ emergency escalation: a gas smell is escalated and routine dispatch is blocked (245.490162ms)
+  ✔ an unsupported category is saved and routed to a person (106.777998ms)
+  ✔ a failed database write saves nothing and a retry succeeds (362.386214ms)
+  ✔ voice intake is refused cleanly when the voice service rejects the credentials (513.913484ms)
+✔ safety and failure (1230.624622ms)
+▶ the vendor directory is per property
+  ✔ a manager sees and edits only vendors listed at their own properties (194.087442ms)
+  ✔ removing a vendor's approval at one property stops offers there and nowhere else (511.251017ms)
+✔ the vendor directory is per property (1352.783658ms)
+▶ new categories follow their own policy
+  ✔ neighbour noise is the manager's: no vendor can be offered it; it is handled directly and confirmed by the resident (1240.149863ms)
+  ✔ a lockout goes to a person for an identity check, never to a vendor automatically (545.777005ms)
+  ✔ a lockout with a child inside is an emergency (461.37597ms)
+✔ new categories follow their own policy (2258.203463ms)
+▶ a contractor asks for more money: only a manager can decide
+  ✔ the request needs an amount and a reason; it is the vendor's, and the resident does not see it (446.179507ms)
+  ✔ approval raises the approved maximum, and the final cost is checked against it (387.216077ms)
+✔ a contractor asks for more money: only a manager can decide (2549.373871ms)
+▶ chat intake is asynchronous
+  ✔ sending returns at once with the message saved; a second message waits; the reply arrives from the job (1474.368443ms)
+✔ chat intake is asynchronous (1475.289894ms)
+▶ security
+  ✔ instructions inside a report are just text: nothing is approved, resolved or escalated by them (107.494599ms)
+  ✔ a user can acknowledge only their own notifications (33.421537ms)
+  ✔ the health check exposes configuration flags only (7.276211ms)
+  ✔ test hooks refuse anything outside their allowlist (7.453647ms)
+  ✔ notification preferences: email is opt-in and needs an address (73.2672ms)
+✔ security (230.466329ms)
 ▶ Scenario 1: leaking kitchen sink, resident to resolution
-  ✔ 1-2. the resident reports it and it persists, routed to the manager (77.801078ms)
-  ✔ a retried submission returns the same case and creates nothing (54.12131ms)
-  ✔ 3. the manager sees the actual case; other people do not (158.145945ms)
-  ✔ 4. the manager assigns an approved plumber (only plumbers are eligible) (159.731653ms)
-  ✔ 5. the contractor signs in and receives the assignment; another contractor does not (85.75897ms)
-  ✔ 6. the contractor gives an estimate and availability (169.39416ms)
-  ✔ the resident's choice waits for the approval; work cannot start yet (142.787189ms)
-  ✔ 7-8. the manager approves; the visit is confirmed because everyone required has agreed (157.412275ms)
-  ✔ 9. the resident sees the appointment and the updated timeline (48.194993ms)
-  ✔ 10. the contractor does the work and reports it complete (129.834954ms)
-  ✔ completion is not resolution: only the resident can confirm, and the manager must wait (36.990066ms)
-  ✔ 11-12. the resident verifies; the case is RESOLVED with its full history (77.110606ms)
-✔ Scenario 1: leaking kitchen sink, resident to resolution (1516.402509ms)
+  ✔ 1-2. the resident reports it and it persists, routed to the manager (161.788834ms)
+  ✔ a retried submission returns the same case and creates nothing (102.338722ms)
+  ✔ 3. the manager sees the actual case; other people do not (228.537437ms)
+  ✔ 4. the manager assigns an approved plumber (only plumbers are eligible) (353.495287ms)
+  ✔ 5. the contractor signs in and receives the assignment; another contractor does not (128.61278ms)
+  ✔ 6. the contractor gives an estimate and availability (247.004295ms)
+  ✔ the resident's choice waits for the approval; work cannot start yet (158.17625ms)
+  ✔ 7-8. the manager approves; the visit is confirmed because everyone required has agreed (223.515186ms)
+  ✔ 9. the resident sees the appointment and the updated timeline (51.609839ms)
+  ✔ 10. the contractor does the work and reports it complete (199.342619ms)
+  ✔ completion is not resolution: only the resident can confirm, and the manager must wait (49.370389ms)
+  ✔ 11-12. the resident verifies; the case is RESOLVED with its full history (139.805209ms)
+✔ Scenario 1: leaking kitchen sink, resident to resolution (2928.420167ms)
 ▶ Scenario 2: the same engine handles an appliance case (approved by policy)
-  ✔ a washer that will not drain goes from report to resolution (386.532937ms)
-✔ Scenario 2: the same engine handles an appliance case (approved by policy) (386.956191ms)
-ℹ tests 31
-ℹ suites 5
-ℹ pass 31
+  ✔ a washer that will not drain goes from report to resolution (709.625434ms)
+✔ Scenario 2: the same engine handles an appliance case (approved by policy) (710.503951ms)
+ℹ tests 85
+ℹ suites 24
+ℹ pass 85
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 6524.488463
+ℹ duration_ms 127123.619612

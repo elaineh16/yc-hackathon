@@ -1,35 +1,56 @@
-# unit tests, 2026-11-22 23:30:13 EST
+# unit tests, 2026-11-23 05:35:33 EST
 $ npx tsx --test tests/unit/*.test.ts
+▶ staff-only building notes
+  ✔ a marked line is hidden, the rest of its paragraph is not (38.238984ms)
+  ✔ markers written as bullets, quotes, numbered items or in bold are recognised (5.371341ms)
+  ✔ continuation lines of a staff block stay hidden until the next blank line (1.393065ms)
+  ✔ a staff-only heading hides its whole section, up to the next heading (2.070874ms)
+  ✔ ordinary notes are untouched (2.352665ms)
+✔ staff-only building notes (64.444609ms)
+▶ the reply guard
+  ✔ a secret is withheld however it is written (10.909987ms)
+  ✔ anything that reads as a code is withheld even when it is not a known secret (3.380792ms)
+  ✔ ordinary numbers are left alone (4.817864ms)
+✔ the reply guard (22.521632ms)
 ▶ state machine
-  ✔ every status except the closed ones has an owner and a next action (1.446287ms)
-  ✔ the main path is reachable in order (0.412806ms)
-  ✔ a contractor can complete work but never resolve a case (1.433294ms)
-  ✔ the AI coordinator's powers are limited (5.866779ms)
-  ✔ work cannot be scheduled while an approval is pending, and closed cases stay closed (0.510962ms)
-  ✔ two-target actions require an explicit target from the allowed set (0.305109ms)
-✔ state machine (11.940946ms)
+  ✔ every status except the closed ones has an owner and a next action (13.246575ms)
+  ✔ the main path is reachable in order (4.885116ms)
+  ✔ a contractor can complete work but never resolve a case (7.250001ms)
+  ✔ the AI coordinator's powers are limited (7.566009ms)
+  ✔ work cannot be scheduled while an approval is pending, and closed cases stay closed (3.613318ms)
+  ✔ two-target actions require an explicit target from the allowed set (2.563108ms)
+✔ state machine (52.367514ms)
 ▶ triage safety rules
-  ✔ hazards in the resident's words escalate (4.420201ms)
-  ✔ a chirping smoke detector is not a fire; a sounding alarm is (0.394676ms)
-  ✔ negated mentions are not hazards (0.506745ms)
-  ✔ a yes to a safety question escalates; an unsure answer goes to a person (0.626231ms)
-  ✔ categories from wording, and unknown problems go to a person (0.29455ms)
-  ✔ no heat with someone at risk is an emergency (0.235058ms)
-✔ triage safety rules (7.088477ms)
+  ✔ hazards in the resident's words escalate (124.406974ms)
+  ✔ a chirping smoke detector is not a fire; a sounding alarm is (3.923057ms)
+  ✔ negated mentions are not hazards (11.3866ms)
+  ✔ a yes to a safety question escalates; an unsure answer goes to a person (4.872891ms)
+  ✔ categories from wording, and unknown problems go to a person (9.485495ms)
+  ✔ V1.1 categories from wording (10.456895ms)
+  ✔ a person smoking next door is not a fire; a smoking outlet is (7.488574ms)
+  ✔ a chirping CO detector needs a battery; a sounding CO alarm is an emergency (3.984262ms)
+  ✔ water reaching electrics escalates; water kept away from them does not (17.745551ms)
+  ✔ a resident's 'something else' is kept and goes to a person, with what the wording suggests (2.514916ms)
+  ✔ lockouts and elevators (18.638787ms)
+  ✔ sounds of violence escalate with advice to call 911 (6.844132ms)
+  ✔ no heat with someone at risk is an emergency (2.242205ms)
+  ✔ hazards in everyday wording escalate (12.702887ms)
+  ✔ alarming words that are not emergencies do not escalate (11.518611ms)
+✔ triage safety rules (265.77389ms)
 ▶ intake validation
-  ✔ keeps only the category's answers, in canonical types (0.867336ms)
-  ✔ reports missing and invalid answers (0.275257ms)
-  ✔ text answers of 'none' are treated as no answer (0.357951ms)
-✔ intake validation (1.875038ms)
+  ✔ keeps only the category's answers, in canonical types (5.562691ms)
+  ✔ reports missing and invalid answers (2.001342ms)
+  ✔ text answers of 'none' are treated as no answer (4.388124ms)
+✔ intake validation (15.498444ms)
 ▶ spending and scheduling rules
-  ✔ fixed estimates at or under the threshold are approved by policy; inspection-first never is (0.238354ms)
-  ✔ overlap is half-open: back-to-back visits do not clash (0.260049ms)
-✔ spending and scheduling rules (0.621404ms)
-ℹ tests 17
-ℹ suites 4
-ℹ pass 17
+  ✔ fixed estimates at or under the threshold are approved by policy; inspection-first never is (1.958481ms)
+  ✔ overlap is half-open: back-to-back visits do not clash (2.012495ms)
+✔ spending and scheduling rules (5.049655ms)
+ℹ tests 34
+ℹ suites 6
+ℹ pass 34
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 271.870379
+ℹ duration_ms 1370.93247
