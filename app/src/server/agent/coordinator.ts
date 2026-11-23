@@ -24,6 +24,7 @@ import { kickEmail } from "../notify/email";
 import { mark, traced } from "../tracing";
 import { approvedVendorsFor, assertDispatchable } from "../vendors/directory";
 import { ensureDiscoveryTx, kickDiscovery } from "../vendors/discovery";
+import { candidateSourceFilter } from "../vendors/fiber";
 import { COORDINATOR_PROMPT as PROMPT } from "./coordinatorPolicy";
 import { checkGrounding } from "./grounding";
 import { searchKnowledge, searchPastCases } from "./knowledge";
@@ -262,7 +263,7 @@ async function reason(caseId: string, runId: string, trigger: string) {
       run: async () => {
         const s = await snapshot(caseId);
         if (!isTrade(s.c.category)) return { ok: true, businesses: [], note: "This kind of case does not use vendors." };
-        const rows = await prisma.vendorCandidate.findMany({ where: { propertyId, trade: s.c.category, status: { not: "REJECTED" } }, orderBy: { updatedAt: "desc" }, take: 8 });
+        const rows = await prisma.vendorCandidate.findMany({ where: { propertyId, trade: s.c.category, status: { not: "REJECTED" }, source: candidateSourceFilter() }, orderBy: { updatedAt: "desc" }, take: 8 });
         candRefs.clear();
         return {
           ok: true,

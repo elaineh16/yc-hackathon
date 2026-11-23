@@ -101,7 +101,8 @@ export const testHook = async (req: Request, res: Response, _ctx: unknown) => {
       return res.json({ ok: true, scenario, calls: { ...fixtureCalls } });
     }
     case "fiberCalls":
-      return res.json({ ok: true, calls: { ...fixtureCalls } });
+      // `mode` lets a test suite refuse to run against a server that could make real (paid) Fiber calls.
+      return res.json({ ok: true, mode: fiberConfig().mode, calls: { ...fixtureCalls } });
     case "discover":
       // Runs a queued discovery now (the job would run it too; the claim makes the second one a no-op).
       if (typeof body.discoveryId !== "string") return res.status(400).json({ message: "discoveryId is required" });

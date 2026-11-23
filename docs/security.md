@@ -103,3 +103,20 @@ vendor was approved everywhere. Managers can remove that approval per property.
   - `/health` returns on/off flags only, and logs record error names, not messages with values.
   - `.env.server` is gitignored and has never been committed; the repository contains no keys.
   - React blocks `javascript:` links in business URLs from discovery.
+
+## After the review: a live Fiber AI key (2026-11-23)
+
+A real key makes every test run a possible cost. These were added with it, and are covered by
+`tests/api/discovery.test.ts` and the live checks in [fiber.md](fiber.md#live-verification):
+
+- **Tests cannot spend credits.** The API and browser suites refuse to run unless the server's Fiber mode is
+  `fixture` or `off`, and test servers are started with `FIBER_MODE=fixture`. The test hooks already refused to
+  change Fiber budget settings outside fixture mode.
+- **Fixture data and real data never mix.** A fixture-mode server shows only fixture businesses and searches, and any
+  other mode shows only real ones.
+- **The spend record survives test resets.** Real searches are kept: the daily budget is counted from them, and a
+  repeated run reuses one instead of paying again. A real search whose case is deleted is cancelled before it can run.
+- **The key stays on the server.** The check script loads `.env.server` itself and never prints the key. It refuses
+  to write its evidence file if the key appears in it.
+- **AI wording is labelled.** A vendor proposal's reason is the model's own text. The manager sees it marked as "not
+  checked", because only drafts to residents and notes on businesses go through the grounding check.

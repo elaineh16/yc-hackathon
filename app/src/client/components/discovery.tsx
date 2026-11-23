@@ -236,7 +236,7 @@ function Candidate({ c }: { c: CandidateView }) {
         )}
         {c.website ? (
           <a className="flex items-center gap-1 underline-offset-2 hover:underline" href={c.website} target="_blank" rel="noreferrer noopener">
-            <Globe className="size-3.5 text-faint" /> {c.website.replace(/^https?:\/\//, "")}
+            <Globe className="size-3.5 text-faint" /> {c.website.replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/$/, "")}
           </a>
         ) : (
           <span className="flex items-center gap-1 text-faint">

@@ -113,7 +113,7 @@ Fixture results are labelled as fixture data everywhere they appear. They are ne
 
 ## Tests
 
-`app/tests/api/discovery.test.ts`, 18 tests over HTTP in fixture mode, covers:
+`app/tests/api/discovery.test.ts`, 19 tests over HTTP in fixture mode, covers:
 
 - vendor exists;
 - no vendor;
@@ -136,18 +136,47 @@ Fixture results are labelled as fixture data everywhere they appear. They are ne
 - concurrent requests making one call;
 - an interrupted run resuming without a second call;
 - repeated interruptions failing clearly.
+- fixture results never shown by a server that is not in fixture mode, and a reset deleting fixture searches.
+
+Every API and browser test refuses to run against a server whose Fiber mode is not `fixture` or `off`, so a test
+can never spend real credits.
 
 The browser journey "missing vendor" (`app/e2e/tests/journeys.spec.ts`) does the same through the UI.
 
-## Live validation
+## Fixture data and real data never mix
 
-`app/scripts/fiber-live-check.ts` makes ONE capped live search, and only with `--yes`:
+- A server in fixture mode shows only fixture businesses and searches; a server in any other mode shows only real
+  ones (`candidateSourceFilter`, `discoveryModeFilter` in `fiber.ts`).
+- A test reset deletes fixture searches but keeps real ones (live or sandbox): they are the record of credits spent
+  that the daily budget is counted from, and the cache that stops a repeated run from paying again. Their businesses
+  are kept with the managers' decisions cleared, and a real search still waiting when its case is deleted is
+  cancelled instead of running.
 
-1. the free balance check;
-2. a refusal below the reserve;
-3. one search for 2 credits;
-4. at most 3 businesses kept;
-5. `chargeInfo` and warnings written to `docs/evidence/fiber-live-check.json`.
+## Live verification
 
-**Status:** see [STATUS.md](../STATUS.md). This build had no `FIBER_API_KEY` available, so no live call was made and
-no credits were used; every result above comes from fixtures.
+Two kinds of check, kept apart:
+
+1. **Script, free:** `app/scripts/fiber-live-check.ts` loads `app/.env.server` itself (a shell variable wins, the key
+   is never printed) and, without `--yes`, makes only the free balance call. With `--yes` it makes one capped search
+   and writes `docs/evidence/fiber-live-check.json`.
+2. **Through the manager interface:** the one paid search, as a manager makes it in the app. Recorded on video by
+   `app/e2e/demo/capture-fiber.mjs`.
+
+**Results (2026-11-23):**
+
+| Check | Result |
+| --- | --- |
+| Authentication and balance (`GET /v1/get-org-credits`, free) | Authenticated; 2,500 of 2,500 credits before |
+| One search, approved by the manager in the UI (`POST /v1/google-maps/search`) | Succeeded in about 9 s: 20 places, 3 kept, 17 filtered ("lower ranked") |
+| What was sent | `"heating and cooling contractor"` near `"Waterloo, ON"`: nothing about the resident |
+| Provider `chargeInfo`, verbatim | `{"method":"charged-now","creditsCharged":2}`; no warnings |
+| Balance after (free call) | 2,498 of 2,500: exactly the 2 credits `chargeInfo` reported |
+| Parsing, persistence, deduplication | Names, categories, ratings, review counts, coordinates, phone and website parsed; candidates saved with the source `fiber:google-maps` and deduplicated by place id |
+| Manager view | Candidates shown with the checks and "Not confirmed by anyone yet: licence, insurance, availability, pricing, email"; one shortlisted, none verified, contacted or approved |
+| After a test reset (no paid call) | The search and its spend record were kept; a new case for the same need reused it (0 credits) with the decisions cleared |
+
+Total spent: **2 credits**, on one search. The script's `--yes` search was not run: the interface check made the
+same call, and repeating it would only have spent credits. Evidence:
+[`docs/evidence/fiber-live-ui-search.json`](evidence/fiber-live-ui-search.json) and the screenshots
+[`fiber-live-discovery-panel.png`](screenshots/v1.1/fiber-live-discovery-panel.png) and
+[`fiber-live-vendors-page.png`](screenshots/v1.1/fiber-live-vendors-page.png).

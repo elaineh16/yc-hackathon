@@ -1,0 +1,138 @@
+{
+  "what": "The one capped live Fiber AI search, made through the manager interface of the running app (Morgan Reyes clicked \"Approve the search\" on an HVAC case at Maple Court, which has no approved heating and cooling vendor). Recorded on video by app/e2e/demo/capture-fiber.mjs.",
+  "at": "2026-11-23T20:03:11.275Z",
+  "finishedAt": "2026-11-23T20:03:39.119Z",
+  "mode": "live",
+  "provider": "fiber",
+  "requestedBy": "Morgan Reyes",
+  "attempts": 1,
+  "sentToFiber": {
+    "endpoint": "POST /v1/google-maps/search (SDK googleMapsSearch2)",
+    "query": "heating and cooling contractor",
+    "location": "Waterloo, ON",
+    "note": "Only a trade phrase and the building city: no resident name, unit, words or contact details."
+  },
+  "result": {
+    "status": "SUCCEEDED",
+    "placesReturned": 20,
+    "candidatesKept": 3,
+    "filteredOut": 17,
+    "filteredReasons": [
+      "Lower ranked: Relay keeps the best 3"
+    ]
+  },
+  "provider_chargeInfo_verbatim": {
+    "method": "charged-now",
+    "creditsCharged": 2
+  },
+  "provider_warnings_verbatim": null,
+  "creditsCharged": 2,
+  "balance": {
+    "before": 2500,
+    "after": 2498,
+    "used": 2,
+    "checkedWith": "GET /v1/get-org-credits (free), before and after; app/scripts/fiber-live-check.ts without --yes"
+  },
+  "budget": {
+    "creditsPerSearch": 2,
+    "dailyCreditBudget": 6,
+    "reserve": 10,
+    "spentTodayAfter": 2,
+    "searchesTodayAfter": 1
+  },
+  "candidatesKept": [
+    {
+      "name": "Dunn Heating and Air Conditioning",
+      "source": "fiber:google-maps",
+      "categories": [
+        "HVAC contractor",
+        "Air conditioning contractor",
+        "Air conditioning repair service",
+        "Drainage service"
+      ],
+      "rating": 4.7,
+      "reviewCount": 1106,
+      "distanceKmFromBuilding": 5.1,
+      "relayCheck": "RECOMMENDED",
+      "statusAfterSearch": "NEW",
+      "phoneListed": true,
+      "websiteListed": true,
+      "notConfirmedByAnyone": [
+        "licence",
+        "insurance",
+        "availability",
+        "pricing",
+        "email"
+      ]
+    },
+    {
+      "name": "Reliance Heating, Air Conditioning & Plumbing",
+      "source": "fiber:google-maps",
+      "categories": [
+        "HVAC contractor",
+        "Air conditioning repair service",
+        "Air conditioning store",
+        "Electrician"
+      ],
+      "rating": 4.8,
+      "reviewCount": 2935,
+      "distanceKmFromBuilding": 5.1,
+      "relayCheck": "RECOMMENDED",
+      "statusAfterSearch": "NEW",
+      "phoneListed": true,
+      "websiteListed": true,
+      "notConfirmedByAnyone": [
+        "licence",
+        "insurance",
+        "availability",
+        "pricing",
+        "email"
+      ]
+    },
+    {
+      "name": "Aire One Heating & Cooling KW",
+      "source": "fiber:google-maps",
+      "categories": [
+        "HVAC contractor",
+        "Air conditioning repair service",
+        "Air conditioning store",
+        "Electrician"
+      ],
+      "rating": 4.8,
+      "reviewCount": 10138,
+      "distanceKmFromBuilding": 4.7,
+      "relayCheck": "RECOMMENDED",
+      "statusAfterSearch": "NEW",
+      "phoneListed": true,
+      "websiteListed": true,
+      "notConfirmedByAnyone": [
+        "licence",
+        "insurance",
+        "availability",
+        "pricing",
+        "email"
+      ]
+    }
+  ],
+  "managerAction": "Shortlisted Dunn Heating and Air Conditioning. Nobody verified, contacted or approved any of these businesses; Relay never contacts them.",
+  "screenshots": [
+    "docs/screenshots/v1.1/fiber-live-discovery-panel.png",
+    "docs/screenshots/v1.1/fiber-live-vendors-page.png"
+  ],
+  "retentionCheck": {
+    "script": "app/e2e/demo/check-fiber-retention.mjs (no paid call)",
+    "result": "passed",
+    "afterTestReset": {
+      "liveSearchKept": true,
+      "spentTodayStillCounted": 2
+    },
+    "newHvacCaseAtMapleCourt": {
+      "discovery": "SUCCEEDED, reused",
+      "creditsCharged": 0,
+      "candidatesShown": 3,
+      "candidateSource": "fiber:google-maps",
+      "reviewStateCleared": true
+    },
+    "balanceAfter": 2498
+  }
+}

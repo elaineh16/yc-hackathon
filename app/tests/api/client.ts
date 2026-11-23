@@ -50,7 +50,13 @@ export function user(sessionId: string | null): User {
 export async function hook(name: "reset" | "sweep" | "fault" | "fiber" | "fiberCalls" | "discover" | "deliver" | "env", body: Record<string, unknown> = {}) {
   const res = await fetch(`${BASE}/api/test/${name}`, { method: "POST", headers: { "Content-Type": "application/json", ...(process.env.RELAY_TEST_HOOKS_TOKEN ? { "x-relay-test-token": process.env.RELAY_TEST_HOOKS_TOKEN } : {}) }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`test hook ${name} -> ${res.status}. Is the server running with RELAY_TEST_HOOKS=true?`);
-  return res.json();
+  const out = await res.json();
+  // Every test starts with a reset: refuse to go on against a server that could make real, paid Fiber AI calls.
+  if (name === "reset") {
+    const { mode } = (await hook("fiberCalls")) as { mode?: string };
+    if (mode !== "fixture" && mode !== "off") throw new Error(`Refusing to run tests: the server's Fiber AI mode is "${mode}", so a test could spend real credits. Start it with FIBER_MODE=fixture.`);
+  }
+  return out;
 }
 
 export const slot = (daysAhead: number, hour: number, hours = 2) => {

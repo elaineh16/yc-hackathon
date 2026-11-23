@@ -19,7 +19,7 @@ import { assertCaseAccess, managedPropertyIds } from "../access";
 import { type ActorCtx, addEvent, CASE_INCLUDE, faults, flagForCoordinator, isUuid, type LoadedCase, managerIds, notify, SYSTEM, type Tx, withCase } from "../cases/engine";
 import { mark } from "../tracing";
 import { casesWaitingFor, coverage } from "./directory";
-import { creditsCharged, type FiberPlace, fiberConfig, fiberCredits, fiberSearchPlaces } from "./fiber";
+import { candidateSourceFilter, creditsCharged, discoveryModeFilter, type FiberPlace, fiberConfig, fiberCredits, fiberSearchPlaces } from "./fiber";
 
 const ACTIVE = ["AWAITING_MANAGER", "QUEUED", "RUNNING"] as const;
 
@@ -411,6 +411,11 @@ export async function runDiscovery(discoveryId: string): Promise<{ status: strin
   const cfg = fiberConfig();
   const finish = (data: Prisma.VendorDiscoveryUpdateInput) => prisma.vendorDiscovery.update({ where: { id: d.id }, data: { finishedAt: new Date(), ...data } });
 
+  // A search whose case was deleted never runs: nobody is waiting for it, and it would spend credits.
+  if (!d.caseId && !d.response) {
+    await finish({ status: "CANCELLED", errorCode: "not_needed", errorMessage: "The case no longer exists." });
+    return { status: "cancelled" };
+  }
   // Still needed? A manager may have added a vendor or closed the case while this waited.
   if (d.caseId && !d.response) {
     const still = await prisma.case.findUnique({ where: { id: d.caseId }, include: CASE_INCLUDE });
@@ -470,6 +475,8 @@ export async function runDiscovery(discoveryId: string): Promise<{ status: strin
           errorMessage: null,
         },
       });
+      // The balance shown in Settings was read before this search: read it again next time instead of showing a stale one.
+      balanceCache = null;
       mark("relay.discovery.searched", { discoveryId: d.id, mode: cfg.mode, places: places.length, credits: creditsCharged(res.chargeInfo) });
       return { places: places as FiberPlace[] };
     });
@@ -647,7 +654,7 @@ export async function discoveryPanel(actor: ActorCtx, caseId: unknown): Promise<
   const cfg = fiberConfig();
   const trade = c.category;
   const [discoveries, cov] = await Promise.all([prisma.vendorDiscovery.findMany({ where: { caseId: c.id }, orderBy: { createdAt: "desc" }, take: 6 }), coverage(prisma, c)]);
-  const candidates = isTrade(trade) ? await prisma.vendorCandidate.findMany({ where: { propertyId: c.propertyId, trade }, orderBy: [{ updatedAt: "desc" }], take: 20, include: { discovery: { select: { createdAt: true } } } }) : [];
+  const candidates = isTrade(trade) ? await prisma.vendorCandidate.findMany({ where: { propertyId: c.propertyId, trade, source: candidateSourceFilter() }, orderBy: [{ updatedAt: "desc" }], take: 20, include: { discovery: { select: { createdAt: true } } } }) : [];
   const vendorIds = [...new Set(candidates.map((x) => x.duplicateOfVendorId).filter((x): x is string => !!x))];
   const names = new Map((await prisma.vendor.findMany({ where: { id: { in: vendorIds } }, select: { id: true, name: true } })).map((v) => [v.id, v.name] as const));
   const now = new Date();
@@ -675,8 +682,9 @@ export async function fiberStatus(actor: ActorCtx): Promise<FiberStatus> {
   const propertyIds = await managedPropertyIds(prisma, actor.userId!);
   if (!balanceCache || Date.now() - balanceCache.at > 5 * 60_000) balanceCache = { at: Date.now(), value: cfg.mode === "off" ? { ok: false, code: "not_configured", message: "No FIBER_API_KEY is set.", httpStatus: null, retryable: false } : await fiberCredits() };
   const b = balanceCache.value;
-  const spent = await prisma.vendorDiscovery.aggregate({ _sum: { creditsCharged: true }, _count: true, where: { mode: { in: ["live", "sandbox"] }, createdAt: { gte: startOfUtcDay() } } });
-  const recent = await prisma.vendorDiscovery.findMany({ where: { propertyId: { in: propertyIds } }, orderBy: { createdAt: "desc" }, take: 8, include: { case: { select: { number: true } } } });
+  // Calls actually made today: a reused result is not a search.
+  const spent = await prisma.vendorDiscovery.aggregate({ _sum: { creditsCharged: true }, _count: true, where: { mode: { in: ["live", "sandbox"] }, reusedFromId: null, status: { in: ["SUCCEEDED", "FAILED"] }, createdAt: { gte: startOfUtcDay() } } });
+  const recent = await prisma.vendorDiscovery.findMany({ where: { propertyId: { in: propertyIds }, mode: discoveryModeFilter() }, orderBy: { createdAt: "desc" }, take: 8, include: { case: { select: { number: true } } } });
   return {
     mode: cfg.mode,
     configured: cfg.mode !== "off",
@@ -698,7 +706,7 @@ export async function discoveryQueue(propertyIds: string[]) {
   const [waiting, failed, candidates] = await Promise.all([
     prisma.vendorDiscovery.findMany({ where: { propertyId: { in: propertyIds }, status: { in: ["AWAITING_MANAGER", "QUEUED", "RUNNING"] } }, include: { case: { select: { id: true, number: true, title: true } } }, orderBy: { createdAt: "asc" }, take: 10 }),
     prisma.vendorDiscovery.findMany({ where: { propertyId: { in: propertyIds }, status: { in: ["FAILED", "SKIPPED"] }, createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) }, case: { status: { in: ["AWAITING_ASSIGNMENT", "REOPENED", "TRIAGED"] } } }, include: { case: { select: { id: true, number: true, title: true } } }, orderBy: { createdAt: "desc" }, take: 10 }),
-    prisma.vendorCandidate.groupBy({ by: ["propertyId", "trade", "status"], where: { propertyId: { in: propertyIds }, status: { in: ["NEW", "SHORTLISTED", "VERIFIED"] } }, _count: true }),
+    prisma.vendorCandidate.groupBy({ by: ["propertyId", "trade", "status"], where: { propertyId: { in: propertyIds }, status: { in: ["NEW", "SHORTLISTED", "VERIFIED"] }, source: candidateSourceFilter() }, _count: true }),
   ]);
   return { waiting, failed, candidates };
 }

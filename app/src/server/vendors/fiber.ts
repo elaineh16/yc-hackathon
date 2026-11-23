@@ -34,6 +34,14 @@ export const fiberConfig = () => {
   };
 };
 
+/**
+ * Fixture data and real provider data never mix on one screen: a server in fixture mode shows only fixture results,
+ * and a server in any other mode only real ones (a real search kept from earlier stays visible with the key removed).
+ * For Prisma where clauses on VendorCandidate.source and VendorDiscovery.mode.
+ */
+export const candidateSourceFilter = () => (fiberConfig().mode === "fixture" ? { startsWith: "fixture:" } : { not: { startsWith: "fixture:" } });
+export const discoveryModeFilter = () => (fiberConfig().mode === "fixture" ? { equals: "fixture" } : { not: "fixture" });
+
 const apiKey = () => (fiberConfig().mode === "fixture" ? "sk_test_fixture" : process.env.FIBER_API_KEY?.trim() || "");
 const transport = () => (fiberConfig().mode === "fixture" ? { fetch: fixtureFetch as unknown as typeof fetch } : {});
 

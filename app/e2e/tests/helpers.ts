@@ -30,6 +30,9 @@ export async function signIn(browser: Browser, username: string, viewport = { wi
 export async function resetCases() {
   const res = await fetch(`${API}/api/test/reset`, { method: "POST", headers: HOOK_HEADERS, body: "{}" });
   if (!res.ok) throw new Error(`reset failed (${res.status}): run the server with RELAY_TEST_HOOKS=true`);
+  // Refuse to go on against a server that could make real, paid Fiber AI calls.
+  const { mode } = await hook("fiberCalls");
+  if (mode !== "fixture" && mode !== "off") throw new Error(`Refusing to run tests: the server's Fiber AI mode is "${mode}", so a test could spend real credits. Start it with FIBER_MODE=fixture.`);
 }
 
 export const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });

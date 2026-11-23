@@ -39,8 +39,9 @@ const searchCalls = async () => ((await hook("fiberCalls")).calls["/v1/google-ma
 describe("discovery is only for missing coverage", () => {
   test("a vendor exists: no discovery, and asking for one is refused", async () => {
     const r = await report(priya, priyaUnit, "PLUMBING", "The bathroom sink drains very slowly.", { fixture: "bathroom_sink", activeLeak: false, spreading: false, waterNearElectrical: false });
-    // Let the coordinator's coverage check run (it is the first thing a READY_FOR_VENDOR trigger does).
-    await waitFor(async () => (await morgan.must("getCase", { caseId: r.caseId })).events.some((e: any) => e.type === "AI_UNAVAILABLE"), 20_000, "the coordinator run");
+    // Let the coordinator's coverage check run (it is the first thing a READY_FOR_VENDOR trigger does). pg-boss runs one
+    // coordinator job at a time and polls every 2 s, so jobs left by the previous suite can delay this one.
+    await waitFor(async () => (await morgan.must("getCase", { caseId: r.caseId })).events.some((e: any) => e.type === "AI_UNAVAILABLE"), 90_000, "the coordinator run");
     const p = await morgan.must("getDiscoveryPanel", { caseId: r.caseId });
     assert.equal(p.usableVendors, 2);
     assert.equal(p.discoveries.length, 0);
@@ -300,5 +301,27 @@ describe("concurrency and interruption", () => {
     assert.match(p.discoveries[0].errorMessage, /interrupted 3 times/);
     assert.equal((await taylor.must("getCase", { caseId })).status, "AWAITING_ASSIGNMENT");
     await hook("fault", { point: "none", times: 0 });
+  });
+});
+
+describe("fixture results and real results never mix", () => {
+  test("fixture businesses are not shown by a server that is not in fixture mode, and a reset deletes fixture searches", async () => {
+    await hook("reset");
+    assert.equal((await hook("fiberCalls")).mode, "fixture", "the test server says which mode it is in");
+    const { caseId } = await hvac(priya, priyaUnit);
+    const p = await settled(caseId);
+    assert.ok(p.candidates.length > 0 && p.candidates.every((c: any) => c.source.startsWith("fixture:")));
+    assert.ok((await morgan.must("getFiberStatus")).recent.some((d: any) => d.mode === "fixture"));
+    // The same server without fixture mode (as it would be with a real key): the fixture businesses are not offered.
+    await hook("env", { set: { FIBER_MODE: "off" } });
+    // Businesses from a real search kept on this machine may still be listed; fixture ones never are.
+    assert.ok((await morgan.must("getDiscoveryPanel", { caseId })).candidates.every((c: any) => !c.source.startsWith("fixture:")));
+    assert.equal((await morgan.must("getFiberStatus")).recent.filter((d: any) => d.mode === "fixture").length, 0);
+    // A reset restores fixture mode and deletes fixture searches: a new case searches again instead of reusing one.
+    await hook("reset");
+    const before = await searchCalls();
+    const again = await settled((await hvac(priya, priyaUnit)).caseId);
+    assert.equal(again.discoveries[0].reused, false);
+    assert.equal(await searchCalls(), before + 1);
   });
 });

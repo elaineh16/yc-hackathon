@@ -25,7 +25,7 @@ local `qwen2.5:3b` model (`app/tests/eval`). Results and dates are in [STATUS.md
 | --- | --- | --- |
 | Vendor directory per property; per-property approval; isolation between properties | Implemented | API |
 | Coverage check, then a discovery task on the case (automatic or approved by a manager) | Implemented | API, Browser |
-| Fiber AI search through the official SDK (`googleMapsSearch2`, `getOrgCredits`) | Implemented | Fixture mode only (no key was available for a live call) |
+| Fiber AI search through the official SDK (`googleMapsSearch2`, `getOrgCredits`) | Implemented | Live: one search through the manager interface (2 credits, [evidence](evidence/fiber-live-ui-search.json)); fixtures in the API and browser tests |
 | Balance check, reserve, daily budget, cache, at most 3 kept, `chargeInfo` and warnings recorded | Implemented | API (fixtures) |
 | Checks per place: business, trade, distance, contact, duplicate; reasons only from source fields | Implemented | API |
 | Manager review: reject, shortlist, verify (with a note), approve for the property; duplicates approve the existing vendor | Implemented | API, Browser |
@@ -75,6 +75,6 @@ The findings and fixes are in [security.md](security.md).
 
 ## Not done
 
-- **Fiber:** no live call; it needs a key ([STATUS.md](../STATUS.md)).
+- **Fiber:** one live search was made (2 credits). Everything else, including the real error responses (402, 429, 5xx), is tested only against fixtures ([fiber.md](fiber.md)).
 - **Accounts:** no hosted deployment, no account management UI, no password reset, no photos.
 - **Voice:** not re-verified with a live microphone.

@@ -143,15 +143,28 @@ async function applyDirectory(prisma: PrismaClient) {
   }
 }
 
-/** Removes every case and restores the demo policy, directory and preferences. Test hooks only; never in normal use. */
+/** Discovery modes that called the real provider (fiber.ts). Their rows are kept by a reset. */
+const REAL_DISCOVERY_MODES = ["live", "sandbox"];
+
+/**
+ * Removes every case and restores the demo policy, directory and preferences. Test hooks only; never in normal use.
+ * Searches that reached the real Fiber AI API are kept: they are the record of credits spent that the daily budget is
+ * counted from, and the cache that stops a repeated run from paying for the same search again. Their businesses are
+ * kept too, with the managers' decisions on them cleared. Fixture searches are deleted.
+ */
 export async function resetCases(prisma: PrismaClient) {
   await prisma.notification.deleteMany({});
   await prisma.intakeConversation.deleteMany({});
-  await prisma.vendorDiscovery.deleteMany({});
+  // A real search still waiting or running loses its case below: it is cancelled, so it can never run (and spend) without one.
+  await prisma.vendorDiscovery.updateMany({ where: { mode: { in: REAL_DISCOVERY_MODES }, status: { in: ["AWAITING_MANAGER", "QUEUED", "RUNNING"] } }, data: { status: "CANCELLED", errorCode: "reset", errorMessage: "Cancelled by a test reset before it ran.", finishedAt: new Date() } });
+  await prisma.vendorDiscovery.deleteMany({ where: { mode: { notIn: REAL_DISCOVERY_MODES } } });
+  await prisma.vendorCandidate.updateMany({ data: { status: "NEW", reviewedById: null, reviewedAt: null, reviewNote: null, verifiedById: null, verifiedAt: null, verificationNote: null, vendorId: null, aiNote: null, assessedBy: "RULES" } });
   await prisma.case.deleteMany({});
   await prisma.agentRun.deleteMany({});
   // Vendors created by tests or by onboarding a discovered business (never one with a contractor login).
   await prisma.vendor.deleteMany({ where: { OR: [{ source: "DISCOVERY" }, { name: { startsWith: "Test vendor " } }], users: { none: {} } } });
+  const vendorIds = (await prisma.vendor.findMany({ select: { id: true } })).map((v) => v.id);
+  await prisma.vendorCandidate.updateMany({ where: { duplicateOfVendorId: { notIn: vendorIds } }, data: { duplicateOfVendorId: null } });
   for (const key of Object.keys(PLACES) as (keyof typeof PLACES)[]) {
     await prisma.property.updateMany({ where: { name: PROPERTY_NAME[key] }, data: { ...POLICY, ...PLACES[key] } });
   }
