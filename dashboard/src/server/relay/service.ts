@@ -17,11 +17,9 @@ interface EventIn {
   dedupe?: string; // defaults to the type: one event of each type per work order
 }
 async function addEvents(db: Db, workOrderId: string, events: EventIn[]) {
-  const forStudent = events.filter((e) => e.studentMessage).map((e) => e.type);
-  if (forStudent.length) mark("relay.student_update.publish", { workOrderId, types: forStudent.join(",") });
   // Events written together share a transaction; 1 ms apart keeps their timeline order stable.
   const base = Date.now();
-  await db.timelineEvent.createMany({
+  const written = await db.timelineEvent.createMany({
     data: events.map((e, i) => ({
       createdAt: new Date(base + i),
       workOrderId,
@@ -35,6 +33,9 @@ async function addEvents(db: Db, workOrderId: string, events: EventIn[]) {
     })),
     skipDuplicates: true,
   });
+  // Trace a student-visible update only when something new was actually written.
+  const forStudent = events.filter((e) => e.studentMessage).map((e) => e.type);
+  if (forStudent.length && written.count > 0) mark("relay.student_update.publish", { workOrderId, types: forStudent.join(",") });
 }
 
 const isUniqueViolation = (e: unknown) => (e as { code?: string })?.code === "P2002";
@@ -230,8 +231,7 @@ export async function advanceSimulation(workOrderId: string, now = Date.now()) {
   const step = D.simStepMs();
   const due = D.SEEDED_RESULTS.filter((r) => elapsed >= r.revealStep * step);
   if (due.length) {
-    mark("relay.contractor_results.seed", { workOrderId, simulated: true, contractors: due.map((r) => r.contractorKey).join(",") });
-    await prisma.contractorResult.createMany({
+    const inserted = await prisma.contractorResult.createMany({
       data: due.map((r) => ({
         workOrderId,
         contractorKey: r.contractorKey,
@@ -246,6 +246,10 @@ export async function advanceSimulation(workOrderId: string, now = Date.now()) {
       })),
       skipDuplicates: true,
     });
+    // One span per real insert: polling and timers call this repeatedly, and repeats insert nothing.
+    if (inserted.count > 0) {
+      mark("relay.contractor_results.seed", { workOrderId, simulated: true, inserted: inserted.count, contractors: due.map((r) => r.contractorKey).join(",") });
+    }
     await addEvents(
       prisma,
       workOrderId,

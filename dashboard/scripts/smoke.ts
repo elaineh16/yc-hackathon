@@ -1,19 +1,25 @@
 // End-to-end check of the running Wasp server over HTTP: the same endpoints the pages and ElevenLabs use.
 // No phones, no ElevenLabs, no contractors. Usage (server running, SIM_STEP_MS small for speed):
-//   RELAY_TOOL_SECRET=... npx tsx scripts/smoke.ts        (reads .env.server if the var is unset)
-// Exits non-zero if any check fails. WARNING: calls resetDemo, which wipes the demo database.
+//   SMOKE_CONFIRM_RESET=yes npx tsx scripts/smoke.ts     (reads RELAY_TOOL_SECRET and OPERATOR_PIN from .env.server if unset)
+// Exits non-zero if any check fails.
+// WARNING: it calls resetDemo repeatedly, which WIPES every work order and session in that server's database.
+// Never point it at a database you are rehearsing or recording with: it refuses to run without SMOKE_CONFIRM_RESET=yes.
 import { readFileSync } from "node:fs";
 
 const BASE = process.env.BASE_URL || "http://localhost:3001";
-const SECRET =
-  process.env.RELAY_TOOL_SECRET ||
-  (() => {
-    try {
-      return readFileSync(".env.server", "utf8").match(/^RELAY_TOOL_SECRET=(.*)$/m)?.[1]?.trim() ?? "";
-    } catch {
-      return "";
-    }
-  })();
+const fromEnvFile = (key: string) => {
+  try {
+    return readFileSync(".env.server", "utf8").match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
+};
+const SECRET = process.env.RELAY_TOOL_SECRET || fromEnvFile("RELAY_TOOL_SECRET");
+const PIN = process.env.OPERATOR_PIN ?? fromEnvFile("OPERATOR_PIN");
+if (process.env.SMOKE_CONFIRM_RESET !== "yes") {
+  console.error(`Refusing to run: this WIPES the demo database behind ${BASE}. Re-run with SMOKE_CONFIRM_RESET=yes if that is intended.`);
+  process.exit(2);
+}
 
 let failures = 0;
 const check = (ok: unknown, what: string) => {
@@ -22,13 +28,16 @@ const check = (ok: unknown, what: string) => {
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+const OPERATOR_OPS = new Set(["staffAccept", "staffMarkRetrieved", "staffMarkUnavailable", "approveRepair", "denyRepair", "simulateConfirmation", "resetDemo"]);
 
-/** Calls a Wasp query/action the way the client does (superjson body). */
-async function op(name: string, args?: unknown): Promise<{ status: number; data: any; error?: string }> {
+/** Calls a Wasp query/action the way the client does (superjson body). Operator actions carry the PIN when one is set. */
+async function op(name: string, args?: unknown, opts: { withPin?: boolean } = {}): Promise<{ status: number; data: any; error?: string }> {
+  const withPin = opts.withPin ?? true;
+  const payload = PIN && withPin && OPERATOR_OPS.has(name) ? { ...((args as object) ?? {}), operatorPin: PIN } : (args ?? null);
   const res = await fetch(`${BASE}/operations/${kebab(name)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ json: args ?? null }),
+    body: JSON.stringify({ json: payload }),
   });
   const body: any = await res.json().catch(() => ({}));
   return res.ok ? { status: res.status, data: body.json } : { status: res.status, data: null, error: body.message };
@@ -103,6 +112,16 @@ check((await student(B)).sessionValid && (await student(B)).workOrder === null, 
   check(r.body.work_order_id === woId && (await student(C)).workOrder?.id === woId && (await student(A)).workOrder === null, "repeat report from a reopened page moves the order to that page");
   await intake(demoReport(A, { symptom: "Washer won't drain, door locked, clothes inside" }));
   check((await student(A)).workOrder?.id === woId, "order follows the latest reporting session");
+}
+
+console.log("\n1b. Operator PIN");
+if (PIN) {
+  check((await op("staffAccept", { workOrderId: woId, etaMinutes: 15 }, { withPin: false })).status === 401, "staff action without the PIN -> 401");
+  check((await op("approveRepair", { workOrderId: woId, capCents: 40_000, operatorPin: "00000000-wrong" }, { withPin: false })).status === 401, "manager action with a wrong PIN -> 401");
+  check((await op("resetDemo", undefined, { withPin: false })).status === 401, "reset without the PIN -> 401");
+  check((await dash()).workOrder?.staff.status === "REQUESTED", "refused actions changed nothing");
+} else {
+  check(true, "no OPERATOR_PIN set on this server: dashboard actions are open (PIN checks skipped)");
 }
 
 console.log("\n2. Guards before approval");

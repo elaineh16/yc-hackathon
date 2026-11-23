@@ -18,6 +18,7 @@ page StudentPage {
 }
 
 route OperatorRoute { path: "/operator", to: OperatorPage }
+route DashboardRoute { path: "/dashboard", to: OperatorPage }
 page OperatorPage {
   component: import { OperatorPage } from "@src/client/OperatorPage"
 }
