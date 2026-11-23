@@ -1,5 +1,7 @@
-# Relay CI. Unit tests and type-check, then the API suite and the browser journey against a real Wasp server
-# backed by Postgres. The agents are turned off here (no model in CI); the agent tests run locally against Ollama.
+# Relay CI. Type-check, unit tests and the deterministic AI evaluation (with a safety gate), then every API suite and
+# the browser journeys against a real Wasp server backed by Postgres, with email captured by Mailpit and vendor
+# discovery on Fiber-shaped fixtures (no key, no credits). There is no model in CI: the agents run in their
+# documented "AI unavailable" mode here; the live-model evaluation and agent tests run locally against Ollama.
 name: ci
 
 on:
@@ -10,7 +12,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     services:
       postgres:
         image: postgres:16
@@ -21,10 +23,11 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U relay" --health-interval 5s --health-timeout 5s --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ["1025:1025", "8025:8025"]
     env:
       DATABASE_URL: postgresql://relay:relay@localhost:5432/relay
-      LLM_DISABLED: "true"
-      RELAY_TEST_HOOKS: "true"
     defaults:
       run:
         working-directory: app
@@ -35,25 +38,41 @@ jobs:
           node-version: "24.22.1"
       - name: Install the Wasp CLI
         run: npm i -g @wasp.sh/wasp-cli@0.22.0
-      - name: Environment
+      - name: Environment (no secrets: fixtures for discovery, Mailpit for email, no model)
         run: |
-          printf 'LLM_DISABLED=true\nRELAY_TEST_HOOKS=true\nRELAY_TIMEZONE=America/Toronto\n' > .env.server
+          cat > .env.server <<'EOF'
+          LLM_DISABLED=true
+          RELAY_TEST_HOOKS=true
+          RELAY_TIMEZONE=America/Toronto
+          FIBER_MODE=fixture
+          FIBER_RETRY_SECONDS=2
+          SMTP_HOST=localhost
+          SMTP_PORT=1025
+          SMTP_CAPTURE=true
+          MAIL_FROM="Relay <relay@relay.localhost>"
+          RELAY_APP_URL=http://localhost:3000
+          EMAIL_MAX_PER_USER_PER_HOUR=60
+          EOF
       - name: Compile (installs dependencies, builds the SDK)
         run: wasp compile
       - name: Type-check
         run: npx tsc --noEmit -p tsconfig.json
       - name: Unit tests
         run: npx tsx --test tests/unit/*.test.ts
-      - name: Database
-        run: wasp db migrate-dev --name ci < /dev/null && wasp db seed < /dev/null
+      - name: AI evaluation, deterministic (99 cases + 30 held out), with the safety gate
+        run: npx tsx tests/eval/deterministic.ts --gate
+      - name: Database (migrations, then the demo accounts)
+        run: |
+          npx prisma migrate deploy --schema .wasp/out/db/schema.prisma < /dev/null
+          wasp db seed < /dev/null
       - name: Start the app
         run: |
           nohup wasp start > ../wasp.log 2>&1 &
           for i in $(seq 1 120); do curl -sf localhost:3001/health && curl -sf -o /dev/null localhost:3000/login && exit 0; sleep 3; done
           cat ../wasp.log; exit 1
-      - name: API tests
-        run: npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts
-      - name: Browser journey
+      - name: API tests (workflow, reliability, vendor discovery, follow-ups, V1.1 rules and security)
+        run: npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts tests/api/discovery.test.ts tests/api/followups.test.ts tests/api/v11.test.ts tests/api/audit.test.ts
+      - name: Browser journeys
         working-directory: app/e2e
         env:
           PW_CHANNEL: chromium
@@ -62,7 +81,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           mkdir -p test-results/shots
-          npx playwright test
+          npx playwright test journey
       - name: Logs and reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
