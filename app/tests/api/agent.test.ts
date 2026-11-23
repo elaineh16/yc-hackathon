@@ -3,7 +3,7 @@
 // Run: npm run test:api -- tests/api/agent.test.ts   (dev server running with RELAY_TEST_HOOKS=true; resets cases)
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
-import { hook, login, sleep, type User } from "./client";
+import { hook, login, sleep, type User, waitFor } from "./client";
 
 let priya: User, morgan: User;
 let unitId = "";
@@ -34,7 +34,15 @@ describe("intake agent", () => {
     ];
     for (const text of turns) {
       if (v.status === "SUBMITTED") break;
-      v = await priya.must("sendIntakeMessage", { conversationId: v.id, text });
+      const t0 = Date.now();
+      const sent = await priya.must("sendIntakeMessage", { conversationId: v.id, text });
+      // Asynchronous: the request returns at once with the message saved; the reply comes from a background job.
+      assert.equal(sent.pending, true, "the message is acknowledged before the model answers");
+      assert.ok(Date.now() - t0 < 5000, "sending does not wait for the model");
+      v = await waitFor(async () => {
+        const x = await priya.must("getIntakeConversation", { unitId, conversationId: sent.id });
+        return x.pending ? null : x;
+      }, 6 * 60_000, "Relay's reply");
       const last = v.messages.at(-1)!;
       t.diagnostic(`relay: ${last.text.slice(0, 200)}`);
       // Before the server saves it, the assistant must never claim it is saved.

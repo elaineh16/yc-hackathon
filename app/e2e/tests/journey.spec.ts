@@ -102,7 +102,7 @@ test("10. the contractor does the work and reports it complete", async () => {
 test("11-12. the resident verifies and the case is RESOLVED with its full history", async () => {
   await resident.goto(`/my/cases/${casePath}`);
   await expect(resident.getByRole("heading", { name: "Is it fixed?" })).toBeVisible();
-  await resident.getByRole("button", { name: "Yes, it's fixed" }).click();
+  await resident.getByRole("button", { name: "Yes, resolved" }).click();
   await expect(resident.getByTestId("next-action")).toContainText("This case is closed.");
   await shot(resident, "resident-resolved");
   await manager.goto(`/ops/cases/${casePath}`);

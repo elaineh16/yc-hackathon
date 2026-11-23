@@ -83,13 +83,84 @@ describe("triage safety rules", () => {
     assert.equal(triage({ description: "The washing machine will not drain" }).category, "APPLIANCE");
     assert.equal(triage({ description: "No heat, the radiator is cold" }).category, "HVAC");
     assert.equal(triage({ description: "The water heater makes no hot water" }).category, "PLUMBING");
-    const other = triage({ description: "The front door buzzer is broken" });
+    // V1.1 added locks, keys and doors as a category; before that this example went to a person as "other".
+    assert.equal(triage({ description: "The front door buzzer is broken" }).category, "ACCESS");
+    const other = triage({ description: "There is a big tear in the hallway carpet" });
     assert.equal(other.category, "OTHER");
     assert.equal(other.needsReview, true);
+  });
+  test("V1.1 categories from wording", () => {
+    assert.equal(triage({ description: "Half the outlets in my living room stopped working" }).category, "ELECTRICAL");
+    assert.equal(triage({ description: "The lights keep flickering in the bedroom" }).category, "ELECTRICAL");
+    assert.equal(triage({ description: "The elevator doors won't close on the 3rd floor" }).category, "ELEVATOR");
+    assert.equal(triage({ description: "My upstairs neighbour plays loud music every night until 2am" }).category, "NOISE");
+    assert.equal(triage({ description: "The washer is really noisy during the spin cycle but it works" }).category, "APPLIANCE");
+  });
+  test("a person smoking next door is not a fire; a smoking outlet is", () => {
+    const neighbour = triage({ description: "My neighbour is smoking weed on the balcony and it comes into my unit" });
+    assert.equal(neighbour.emergency, false);
+    assert.equal(triage({ description: "The outlet behind the TV is smoking" }).emergency, true);
+  });
+  test("a chirping CO detector needs a battery; a sounding CO alarm is an emergency", () => {
+    assert.equal(triage({ description: "The CO detector in the hallway chirps every minute, I think the battery is low" }).emergency, false);
+    assert.equal(triage({ description: "The CO alarm is going off and I have a headache" }).emergency, true);
+  });
+  test("water reaching electrics escalates; water kept away from them does not", () => {
+    assert.equal(triage({ description: "Water is dripping from the ceiling light in the bathroom" }).emergency, true);
+    assert.equal(triage({ description: "Slow leak under the kitchen sink, the water is not reaching any outlets" }).emergency, false);
+    assert.equal(triage({ description: "Kitchen sink leaking a little, also the hallway light is out" }).emergency, false);
+  });
+  test("a resident's 'something else' is kept and goes to a person, with what the wording suggests", () => {
+    const t = triage({ description: "Something is off in my apartment. There is a humming sound and the lights dim sometimes.", categoryHint: "OTHER" });
+    assert.equal(t.category, "OTHER");
+    assert.equal(t.needsReview, true);
+    assert.ok(t.reasons.some((r) => /wording suggests electrical/.test(r)));
+  });
+  test("lockouts and elevators", () => {
+    const lockout = triage({ description: "I'm locked out of my apartment, I left my keys at work" });
+    assert.equal(lockout.category, "ACCESS");
+    assert.equal(lockout.emergency, false);
+    assert.equal(lockout.needsReview, true, "staff verify identity");
+    assert.equal(triage({ description: "I'm locked out and my baby is inside alone" }).emergency, true);
+    assert.equal(triage({ description: "I'm locked out and the stove is still on" }).emergency, true);
+    assert.equal(triage({ description: "I'm stuck in the elevator between the 2nd and 3rd floor" }).emergency, true);
+    const earlier = triage({ description: "The elevator stopped between floors this morning, nobody was hurt and it is running again" });
+    assert.equal(earlier.emergency, false);
+    assert.equal(earlier.severity, "URGENT");
+    assert.equal(earlier.needsReview, true);
+  });
+  test("sounds of violence escalate with advice to call 911", () => {
+    const t = triage({ description: "I can hear someone screaming for help in the unit next door" });
+    assert.equal(t.emergency, true);
+    assert.match(t.safetyAdvice ?? "", /911/);
   });
   test("no heat with someone at risk is an emergency", () => {
     const t = triage({ description: "Heating stopped", categoryHint: "HVAC", details: { system: "heating", completelyOut: true, vulnerableOccupant: true, burningOrGasSmell: false } });
     assert.equal(t.severity, "EMERGENCY");
+  });
+  // Phrasings found missing by the first held-out set, tested here with different wording (not the held-out text).
+  test("hazards in everyday wording escalate", () => {
+    for (const description of [
+      "I locked myself out and my toddler is inside alone",
+      "the power bank on my desk is swelling up and it's really hot",
+      "the pipe behind the washing machine is spraying water everywhere",
+      "there's a bulge in the ceiling paint, it's wet and dripping onto the floor",
+      "the radiators are ice cold and my 6 month old is here with me",
+      "someone next door keeps yelling 'help me' and things are breaking",
+      "I can smell something burning from the kitchen, I think I left the stove on",
+    ]) {
+      assert.equal(triage({ description }).emergency, true, description);
+    }
+  });
+  test("alarming words that are not emergencies do not escalate", () => {
+    for (const description of [
+      "first time turning the heat on this year and it smells like burning dust, no smoke, it's fading",
+      "the pipes bang like gunshots every morning when the heat comes on",
+      "the paint is bubbling on the bathroom ceiling from the shower steam, no leak",
+      "my e-bike tire is hissing, can someone look at the bike room pump",
+    ]) {
+      assert.equal(triage({ description }).emergency, false, description);
+    }
   });
 });
 
