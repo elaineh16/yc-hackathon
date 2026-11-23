@@ -4,7 +4,7 @@
 // for the repaired-but-still-broken cases, and submissions are recorded instead of saved. The resident is scripted:
 // the case's messages in order, then "Yes, that's right.", then "Please file it now." (at most four turns).
 //
-// Run from app/: npx tsx tests/eval/live.ts --variant v1.1 --out ../docs/evidence/eval-live-v1.1.json [--only I001,I002]
+// Run from app/: npx tsx tests/eval/live.ts --variant v1.1 --out ../docs/evidence/eval-live-v1.1.json [--only I001,I002] [--dataset heldout.v2.json]
 import { writeFileSync } from "node:fs";
 import { guardReply, intakeSystemPrompt, REOPEN_SCHEMA, residentSafeNotes, secretsIn, SUBMIT_SCHEMA, validateSubmit } from "../../src/server/agent/intakePolicy";
 import { llmConfig, type ChatMessage } from "../../src/server/agent/llm";
@@ -25,7 +25,7 @@ const variant = (arg("variant") ?? "v1.1") as "v1" | "v1.1";
 const outPath = arg("out");
 const only = arg("only")?.split(",");
 
-const data = loadDataset();
+const data = loadDataset(arg("dataset") ?? "cases.v1.json");
 const notesByProperty = buildingNotes();
 const pick = (): IntakeCase[] => {
   if (only) return data.cases.filter((c) => only.includes(c.id));

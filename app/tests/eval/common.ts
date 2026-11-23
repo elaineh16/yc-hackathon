@@ -32,7 +32,11 @@ export type CoordinatorCase = {
 };
 export type Dataset = { version: string; createdAt: string; description: string; cases: IntakeCase[]; coordinatorCases: CoordinatorCase[] };
 
-export const loadDataset = (): Dataset => JSON.parse(readFileSync(join(here, "cases.v1.json"), "utf-8"));
+/** The tuned dataset by default; a held-out file (same case format, intake cases only) when named. */
+export const loadDataset = (file = "cases.v1.json"): Dataset => {
+  const d = JSON.parse(readFileSync(join(here, file), "utf-8"));
+  return { ...d, coordinatorCases: d.coordinatorCases ?? [] };
+};
 
 export const acceptable = (e: Expected) => e.acceptableCategories?.length ? e.acceptableCategories : [e.category];
 const RANK = { EMERGENCY: 0, URGENT: 1, ROUTINE: 2 } as const;
