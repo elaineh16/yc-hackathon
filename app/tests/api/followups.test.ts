@@ -261,7 +261,9 @@ describe("G and emergencies: Relay says when it cannot proceed, and unacknowledg
     const ai = await morgan.must("getAiStatus");
     if (ai.available) return; // The model is up on this server: the coordinator reviews instead (covered by agent.test.ts).
     const caseId = (await leak(daniel, danielUnit)).caseId;
-    await waitFor(async () => (await morgan.must("getNotifications")).items.find((x: any) => x.caseId === caseId && x.eventType === "agent.blocked"), 20_000, "the agent-blocked notice");
+    // The notice comes from the coordinator job. pg-boss takes one job per queue every 2 s, and the jobs earlier tests
+    // queued (most for cases a reset has since deleted) run first, so on a slow machine this can take a while.
+    await waitFor(async () => (await morgan.must("getNotifications")).items.find((x: any) => x.caseId === caseId && x.eventType === "agent.blocked"), 90_000, "the agent-blocked notice");
     const notes = (await morgan.must("getNotifications")).items.filter((x: any) => x.caseId === caseId && x.eventType === "agent.blocked");
     assert.equal(notes.length, 1);
     assert.match(notes[0].body, /Next step for you: Assign an approved vendor/);

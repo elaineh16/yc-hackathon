@@ -79,56 +79,67 @@ export async function deliverPendingEmails(limit = 20): Promise<DeliveryResult> 
     RETURNING "id"`;
   out.claimed = claimed.length;
   for (const { id } of claimed) {
-    const n = await prisma.notification.findUnique({ where: { id }, include: { user: { select: { email: true, emailNotifications: true } } } });
-    if (!n) continue;
-    // Preferences may have changed since the row was queued.
-    const blocked = emailBlocker(n.user);
-    if (blocked) {
-      await prisma.notification.update({ where: { id }, data: { status: "SKIPPED", statusNote: blocked } });
-      out.skipped++;
-      continue;
-    }
-    const sentLastHour = await prisma.notification.count({ where: { userId: n.userId, channel: "EMAIL", status: { in: ["ACCEPTED", "CAPTURED"] }, sentAt: { gte: new Date(Date.now() - 3600_000) } } });
-    if (sentLastHour >= c.maxPerHour) {
-      await prisma.notification.update({ where: { id }, data: { status: "SKIPPED", statusNote: `Send limit reached (${c.maxPerHour} emails per hour). The in-app notification was delivered.` } });
-      out.skipped++;
-      continue;
-    }
-    // Still ours? A slow batch can outlive the claim's lease, and then another pass has re-claimed the row (counting an
-    // attempt): this pass must not send it too. Refreshing the lease here also covers the send itself.
-    const ours = await prisma.notification.updateMany({ where: { id, status: "SENDING", attempts: n.attempts }, data: { nextAttemptAt: new Date(Date.now() + 2 * 60_000) } });
-    if (ours.count === 0) continue;
     try {
-      const body = render(n, c.appUrl);
-      // A stable Message-ID: if a send is ever retried after an unrecorded success, mail systems can drop the copy.
-      const info = await transporter().sendMail({ from: c.from, to: n.user.email!, subject: n.title, text: body.text, html: body.html, messageId: `<${n.id}@relay.local>`, headers: { "X-Relay-Event": n.eventType } });
-      const accepted = (info.accepted ?? []).length > 0;
-      if (!accepted) throw new Error("The mail server did not accept the recipient.");
-      await prisma.notification.update({
-        where: { id },
-        data: {
-          status: c.capture ? "CAPTURED" : "ACCEPTED",
-          sentAt: new Date(),
-          providerMessageId: String(info.messageId ?? "").slice(0, 200) || null,
-          lastError: null,
-          statusNote: c.capture ? "Captured by the local test mail server (Mailpit). It was not delivered to anyone." : `Accepted by the mail server at ${c.host}. Delivery to the mailbox is not confirmed.`,
-        },
-      });
-      if (c.capture) out.captured++;
-      else out.accepted++;
+      await deliverOne(id, c, out);
     } catch (e) {
-      const message = String((e as Error)?.message ?? e).replace(/\s+/g, " ").slice(0, 300);
-      const last = n.attempts >= c.maxAttempts;
-      await prisma.notification.update({
-        where: { id },
-        data: last
-          ? { status: "FAILED", lastError: message, statusNote: `Not sent after ${n.attempts} attempts.` }
-          : { status: "PENDING", lastError: message, nextAttemptAt: new Date(Date.now() + (n.attempts === 1 ? 60_000 : 300_000)) },
-      });
-      if (last) out.failed++;
-      else out.retrying++;
+      // One row's failure (for example a row deleted while the pass ran) never stops the others; a row left
+      // SENDING is picked up again when its lease runs out.
+      console.warn("[email] could not process a notification:", (e as Error)?.name);
     }
   }
   if (out.claimed) mark("relay.email.delivery", { ...out });
   return out;
+}
+
+/** Sends one claimed row, or records why it was skipped, retried or failed. */
+async function deliverOne(id: string, c: ReturnType<typeof emailConfig>, out: DeliveryResult) {
+  const n = await prisma.notification.findUnique({ where: { id }, include: { user: { select: { email: true, emailNotifications: true } } } });
+  if (!n) return;
+  // Preferences may have changed since the row was queued.
+  const blocked = emailBlocker(n.user);
+  if (blocked) {
+    await prisma.notification.update({ where: { id }, data: { status: "SKIPPED", statusNote: blocked } });
+    out.skipped++;
+    return;
+  }
+  const sentLastHour = await prisma.notification.count({ where: { userId: n.userId, channel: "EMAIL", status: { in: ["ACCEPTED", "CAPTURED"] }, sentAt: { gte: new Date(Date.now() - 3600_000) } } });
+  if (sentLastHour >= c.maxPerHour) {
+    await prisma.notification.update({ where: { id }, data: { status: "SKIPPED", statusNote: `Send limit reached (${c.maxPerHour} emails per hour). The in-app notification was delivered.` } });
+    out.skipped++;
+    return;
+  }
+  // Still ours? A slow batch can outlive the claim's lease, and then another pass has re-claimed the row (counting an
+  // attempt): this pass must not send it too. Refreshing the lease here also covers the send itself.
+  const ours = await prisma.notification.updateMany({ where: { id, status: "SENDING", attempts: n.attempts }, data: { nextAttemptAt: new Date(Date.now() + 2 * 60_000) } });
+  if (ours.count === 0) return;
+  try {
+    const body = render(n, c.appUrl);
+    // A stable Message-ID: if a send is ever retried after an unrecorded success, mail systems can drop the copy.
+    const info = await transporter().sendMail({ from: c.from, to: n.user.email!, subject: n.title, text: body.text, html: body.html, messageId: `<${n.id}@relay.local>`, headers: { "X-Relay-Event": n.eventType } });
+    const accepted = (info.accepted ?? []).length > 0;
+    if (!accepted) throw new Error("The mail server did not accept the recipient.");
+    await prisma.notification.update({
+      where: { id },
+      data: {
+        status: c.capture ? "CAPTURED" : "ACCEPTED",
+        sentAt: new Date(),
+        providerMessageId: String(info.messageId ?? "").slice(0, 200) || null,
+        lastError: null,
+        statusNote: c.capture ? "Captured by the local test mail server (Mailpit). It was not delivered to anyone." : `Accepted by the mail server at ${c.host}. Delivery to the mailbox is not confirmed.`,
+      },
+    });
+    if (c.capture) out.captured++;
+    else out.accepted++;
+  } catch (e) {
+    const message = String((e as Error)?.message ?? e).replace(/\s+/g, " ").slice(0, 300);
+    const last = n.attempts >= c.maxAttempts;
+    await prisma.notification.update({
+      where: { id },
+      data: last
+        ? { status: "FAILED", lastError: message, statusNote: `Not sent after ${n.attempts} attempts.` }
+        : { status: "PENDING", lastError: message, nextAttemptAt: new Date(Date.now() + (n.attempts === 1 ? 60_000 : 300_000)) },
+    });
+    if (last) out.failed++;
+    else out.retrying++;
+  }
 }
