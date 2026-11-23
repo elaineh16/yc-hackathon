@@ -1,0 +1,35 @@
+# unit tests, 2026-11-22 23:30:13 EST
+$ npx tsx --test tests/unit/*.test.ts
+▶ state machine
+  ✔ every status except the closed ones has an owner and a next action (1.446287ms)
+  ✔ the main path is reachable in order (0.412806ms)
+  ✔ a contractor can complete work but never resolve a case (1.433294ms)
+  ✔ the AI coordinator's powers are limited (5.866779ms)
+  ✔ work cannot be scheduled while an approval is pending, and closed cases stay closed (0.510962ms)
+  ✔ two-target actions require an explicit target from the allowed set (0.305109ms)
+✔ state machine (11.940946ms)
+▶ triage safety rules
+  ✔ hazards in the resident's words escalate (4.420201ms)
+  ✔ a chirping smoke detector is not a fire; a sounding alarm is (0.394676ms)
+  ✔ negated mentions are not hazards (0.506745ms)
+  ✔ a yes to a safety question escalates; an unsure answer goes to a person (0.626231ms)
+  ✔ categories from wording, and unknown problems go to a person (0.29455ms)
+  ✔ no heat with someone at risk is an emergency (0.235058ms)
+✔ triage safety rules (7.088477ms)
+▶ intake validation
+  ✔ keeps only the category's answers, in canonical types (0.867336ms)
+  ✔ reports missing and invalid answers (0.275257ms)
+  ✔ text answers of 'none' are treated as no answer (0.357951ms)
+✔ intake validation (1.875038ms)
+▶ spending and scheduling rules
+  ✔ fixed estimates at or under the threshold are approved by policy; inspection-first never is (0.238354ms)
+  ✔ overlap is half-open: back-to-back visits do not clash (0.260049ms)
+✔ spending and scheduling rules (0.621404ms)
+ℹ tests 17
+ℹ suites 4
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 271.870379

@@ -34,9 +34,19 @@ export async function runLoop(system: string, history: ChatMessage[], tools: Too
   const messages: ChatMessage[] = [{ role: "system", content: system }, ...history];
   const steps: Step[] = [];
   const byName = new Map(tools.map((t) => [t.name, t]));
+  let nudged = false;
   for (let i = 0; i < maxSteps; i++) {
     const reply = await chat(messages, tools);
-    if (reply.toolCalls.length === 0) return { text: reply.content?.trim() || null, steps, endedBy: "answer" };
+    if (reply.toolCalls.length === 0) {
+      const text = reply.content?.trim() || null;
+      // Small models sometimes stop with an empty turn after using a tool. Ask once for the reply itself.
+      if (!text && !nudged && i < maxSteps - 1) {
+        nudged = true;
+        messages.push({ role: "user", content: "(Write your reply to the person now, in one or two short sentences.)" });
+        continue;
+      }
+      return { text, steps, endedBy: "answer" };
+    }
     messages.push({ role: "assistant", content: reply.content, tool_calls: reply.toolCalls });
     let terminal: ToolResult | null = null;
     for (const call of reply.toolCalls) {

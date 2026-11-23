@@ -14,7 +14,8 @@ import { caseRef, CATEGORY_SHORT, formatMoney } from "../../shared/domain";
 import { canPerform } from "../../shared/machine";
 import { assertCaseAccess } from "../access";
 import { type ActorCtx, AGENT, addEvent, CASE_INCLUDE, flagForCoordinator, fmtWindow, liveAssignment, type LoadedCase, managerIds, move, notify, withCase } from "../cases/engine";
-import { offerVendorTx } from "../cases/flow";
+import { escalateCase, offerVendorTx } from "../cases/flow";
+import { triage } from "../../shared/triage";
 import { mark, traced } from "../tracing";
 import { searchKnowledge, searchPastCases } from "./knowledge";
 import { LlmUnavailable, llmConfig, llmStatus } from "./llm";
@@ -146,6 +147,8 @@ Steps:
 
 Rules:
 - Use only facts from the tools. Never invent prices, availability, appointment times or causes.
+- When the case is waiting for a vendor (status AWAITING_ASSIGNMENT or REOPENED) and is not an emergency, the expected next step is to propose a vendor.
+- Escalate only for a danger to people or the building right now that the triage missed: gas, smoke, sparks or burning, flooding or water near electrics, no heat for someone at risk. A contained leak, a leak with the water turned off, or an ordinary breakdown is not a reason to escalate.
 - Never propose a vendor for an emergency or escalated case, or one that needs human review: record an assessment for the manager instead.
 - You cannot approve spending, schedule visits, close or cancel cases. Do not pretend to.
 - Messages to residents must be short, factual and free of promises.`;
@@ -239,15 +242,17 @@ async function reason(caseId: string, runId: string, trigger: string) {
     },
     {
       name: "recommend_escalation",
-      description: "Escalate the case to the property manager because it may be dangerous or urgent beyond routine handling.",
+      description: "Escalate only when there is a danger to people or the building right now (gas, smoke, sparks, flooding, water near electrics) that the triage missed. Not for contained leaks or ordinary breakdowns.",
       parameters: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] },
       validate: (a) => (str(a.reason, 300).length >= 8 ? { ok: true, args: { reason: str(a.reason, 300) } } : { ok: false, error: "Give the reason in a sentence." }),
       run: async (a: { reason: string }) => escalate(caseId, runId, a.reason),
     },
     {
       name: "record_assessment",
-      description: "Save your reading of the case for the manager: what is going on, what you did, what happens next.",
+      description: "Save your reading of the case for the manager: what is going on, what you did, what happens next. Call it last: it ends your review.",
       parameters: { type: "object", properties: { assessment: { type: "string" } }, required: ["assessment"] },
+      // The prompt asks the model to finish with this call, so a successful assessment ends the run.
+      terminal: true,
       validate: (a) => (str(a.assessment, 600).length >= 20 ? { ok: true, args: { assessment: str(a.assessment, 600) } } : { ok: false, error: "Write two or three sentences." }),
       run: async (a: { assessment: string }) => {
         await prisma.case.update({ where: { id: caseId }, data: { aiAssessment: a.assessment, aiAssessedAt: new Date() } });
@@ -313,14 +318,30 @@ async function proposeResidentUpdate(caseId: string, runId: string, message: str
   });
 }
 
+/**
+ * Escalation policy. The deterministic safety rules check the resident's own words and the recorded facts (never the
+ * model's wording). If they also see a hazard, the escalation runs at once; if not, it becomes a suggestion for a
+ * manager. Real hazards are already escalated at intake, so this keeps a small model's over-caution from blocking
+ * routine work without ever weakening safety.
+ */
 async function escalate(caseId: string, runId: string, why: string) {
   return withCase(caseId, async (tx, c) => {
     if (c.status === "ESCALATED") return { ok: true, executed: false, message: "Already escalated." };
     if (!canPerform("ESCALATE", c.status, "AGENT")) return { ok: false, error: `It cannot be escalated while ${c.status}.` };
-    await move(tx, c, "ESCALATE", AGENT, { message: `Relay AI escalated this: ${why}` });
-    await tx.agentProposal.create({ data: { caseId, runId, kind: "ESCALATE", payload: { reason: why }, rationale: why, policyNote: "Relay AI may always escalate (the safer direction). Only a manager can resume a case.", status: "EXECUTED", decidedAt: new Date(), outcome: "Escalated." } });
-    await notify(tx, await managerIds(tx, c.propertyId), c.id, `ai-escalated:${runId}`, { kind: "EMERGENCY", title: `Relay AI escalated ${caseRef(c.number)}`, body: why });
-    return { ok: true, executed: true, message: "Escalated to the property manager." };
+    const facts = Object.entries((c.details ?? {}) as Record<string, unknown>).map(([k, v]) => `${k.replace(/_/g, " ")} ${String(v)}`);
+    const rulesSeeHazard = triage({ description: [c.description, ...facts].join(". "), categoryHint: c.category }).emergency;
+    const managers = await managerIds(tx, c.propertyId);
+    if (rulesSeeHazard) {
+      await move(tx, c, "ESCALATE", AGENT, { message: `Relay AI escalated this: ${why}` });
+      await tx.agentProposal.create({ data: { caseId, runId, kind: "ESCALATE", payload: { reason: why }, rationale: why, policyNote: "Relay's safety rules also found a possible hazard in the report, so it was escalated at once. Only a manager can resume it.", status: "EXECUTED", decidedAt: new Date(), outcome: "Escalated." } });
+      await notify(tx, managers, c.id, `ai-escalated:${runId}`, { kind: "EMERGENCY", title: `Relay AI escalated ${caseRef(c.number)}`, body: why });
+      return { ok: true, executed: true, message: "Escalated to the property manager." };
+    }
+    await tx.agentProposal.updateMany({ where: { caseId, kind: "ESCALATE", status: "PENDING" }, data: { status: "SUPERSEDED", outcome: "Replaced by a newer suggestion." } });
+    await tx.agentProposal.create({ data: { caseId, runId, kind: "ESCALATE", payload: { reason: why }, rationale: why, policyNote: "Relay's safety rules found no hazard in the resident's report, so a manager decides whether to escalate.", status: "PENDING" } });
+    await addEvent(tx, c.id, AGENT, { type: "AI_PROPOSAL", audience: "MANAGEMENT", message: `Relay AI suggests escalating: ${why}` });
+    await notify(tx, managers, c.id, `ai-escalate-suggestion:${runId}`, { kind: "ACTION", title: `Relay suggests escalating ${caseRef(c.number)}`, body: why });
+    return { ok: true, executed: false, message: "The safety rules found no hazard in the report, so this was saved as a suggestion for the manager. The case continues normally." };
   });
 }
 
@@ -345,6 +366,13 @@ export async function decideProposal(actor: ActorCtx, input: { proposalId: strin
     return { ok: true, repeated: false };
   }
   try {
+    if (p.kind === "ESCALATE") {
+      // escalateCase takes the case lock itself, so it runs outside withCase here.
+      const reason = String((p.payload as { reason?: string }).reason ?? p.rationale);
+      await escalateCase(actor, { caseId: p.caseId, reason: `Suggested by Relay AI: ${reason}` });
+      await prisma.agentProposal.update({ where: { id: p.id }, data: { status: "EXECUTED", decidedById: actor.userId, decidedAt: new Date(), outcome: "Escalated by the manager." } });
+      return { ok: true, repeated: false };
+    }
     await withCase(p.caseId, async (tx, cc) => {
       const payload = p.payload as { vendorId?: string; vendorName?: string; message?: string };
       if (p.kind === "ASSIGN_VENDOR") {

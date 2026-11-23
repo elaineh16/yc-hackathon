@@ -1,0 +1,51 @@
+# API tests, 2026-11-22 23:30:14 EST
+$ npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts
+▶ authorization
+  ✔ no session: every operation is refused (16.571364ms)
+  ✔ roles: residents cannot manage, contractors cannot report, managers cannot act as vendors (239.326663ms)
+  ✔ a resident cannot read or act on another resident's case (131.943526ms)
+  ✔ a contractor cannot see or answer another contractor's job (127.763296ms)
+  ✔ a manager cannot see another property's cases (63.908068ms)
+  ✔ self sign-up is blocked (26.398341ms)
+✔ authorization (969.854182ms)
+▶ workflow rules
+  ✔ missing manager approval: work cannot be scheduled or started (238.542039ms)
+  ✔ contractor decline returns the case to the manager, and the vendor loses access (225.361295ms)
+  ✔ missing contractor response: the offer expires through the durable sweep, not a timer (271.978545ms)
+  ✔ invalid transitions are refused with 409 (136.033203ms)
+  ✔ appointment conflict: a vendor cannot be booked twice for the same time (427.099363ms)
+  ✔ cancellation after an offer withdraws it from the vendor (246.036581ms)
+  ✔ repeated and concurrent requests do not double up (352.144571ms)
+  ✔ completion without the resident's verification does not resolve the case (552.441817ms)
+✔ workflow rules (2451.569804ms)
+▶ safety and failure
+  ✔ emergency escalation: a gas smell is escalated and routine dispatch is blocked (132.994801ms)
+  ✔ an unsupported category is saved and routed to a person (48.757704ms)
+  ✔ a failed database write saves nothing and a retry succeeds (110.393034ms)
+  ✔ voice intake is refused cleanly when the voice service rejects the credentials (405.506347ms)
+✔ safety and failure (698.784627ms)
+▶ Scenario 1: leaking kitchen sink, resident to resolution
+  ✔ 1-2. the resident reports it and it persists, routed to the manager (77.801078ms)
+  ✔ a retried submission returns the same case and creates nothing (54.12131ms)
+  ✔ 3. the manager sees the actual case; other people do not (158.145945ms)
+  ✔ 4. the manager assigns an approved plumber (only plumbers are eligible) (159.731653ms)
+  ✔ 5. the contractor signs in and receives the assignment; another contractor does not (85.75897ms)
+  ✔ 6. the contractor gives an estimate and availability (169.39416ms)
+  ✔ the resident's choice waits for the approval; work cannot start yet (142.787189ms)
+  ✔ 7-8. the manager approves; the visit is confirmed because everyone required has agreed (157.412275ms)
+  ✔ 9. the resident sees the appointment and the updated timeline (48.194993ms)
+  ✔ 10. the contractor does the work and reports it complete (129.834954ms)
+  ✔ completion is not resolution: only the resident can confirm, and the manager must wait (36.990066ms)
+  ✔ 11-12. the resident verifies; the case is RESOLVED with its full history (77.110606ms)
+✔ Scenario 1: leaking kitchen sink, resident to resolution (1516.402509ms)
+▶ Scenario 2: the same engine handles an appliance case (approved by policy)
+  ✔ a washer that will not drain goes from report to resolution (386.532937ms)
+✔ Scenario 2: the same engine handles an appliance case (approved by policy) (386.956191ms)
+ℹ tests 31
+ℹ suites 5
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6524.488463

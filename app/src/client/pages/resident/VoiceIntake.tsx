@@ -60,9 +60,9 @@ function Voice({ unitId }: { unitId: string }) {
         setError("Relay needs your microphone. Allow microphone access, or use the chat or form instead.");
         return;
       }
-      const cred = await startVoiceIntake();
+      const cred = await startVoiceIntake({ unitId });
       if (!cred.conversationToken) throw new Error("No voice session was issued.");
-      conversation.startSession({ conversationToken: cred.conversationToken, connectionType: "webrtc" });
+      conversation.startSession({ conversationToken: cred.conversationToken, connectionType: "webrtc", dynamicVariables: cred.dynamicVariables });
     } catch (e) {
       setError(errorText(e));
     } finally {

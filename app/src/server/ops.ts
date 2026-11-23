@@ -59,7 +59,7 @@ export const reportIssue = async (args: IntakeInput, ctx: Ctx) => write(createCa
 export const getIntakeConversation = async (args: { unitId: string; fresh?: boolean }, ctx: Ctx) => getConversation(requireRole(ctx, "RESIDENT"), args);
 export const sendIntakeMessage = async (args: { conversationId: string; text: string }, ctx: Ctx) => write(sendIntakeMessageFn(requireRole(ctx, "RESIDENT"), args));
 export const submitVoiceReport = async (args: Record<string, unknown>, ctx: Ctx) => write(submitVoiceReportFn(requireRole(ctx, "RESIDENT"), args));
-export const startVoiceIntake = async (_args: void, ctx: Ctx) => voiceCredential(requireRole(ctx, "RESIDENT"));
+export const startVoiceIntake = async (args: { unitId?: string } | void, ctx: Ctx) => voiceCredential(requireRole(ctx, "RESIDENT"), args?.unitId);
 export const getMyCases = async (_args: void, ctx: Ctx) => (await read.listCases(requireRole(ctx, "RESIDENT"), { pageSize: 100, sort: "updated" })).items;
 export const chooseVisitTime = async (args: { slotId: string }, ctx: Ctx) => write(flow.answerSlot(requireRole(ctx, "RESIDENT"), args));
 export const declineVisitTimes = async (args: { caseId: string; note?: string }, ctx: Ctx) => write(flow.declineSlots(requireRole(ctx, "RESIDENT"), args));

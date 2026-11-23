@@ -47,7 +47,7 @@ describe("intake agent", () => {
     assert.equal(c.channel, "CHAT");
     assert.equal(c.triageSource, "AGENT");
     assert.equal(c.category, "PLUMBING");
-    assert.match(c.description, /kitchen sink is leaking/, "the resident's own words are kept verbatim");
+    assert.match(c.description, /the kitchen sink in my unit is leaking underneath/, "the resident's own words are kept verbatim");
     assert.ok(c.triageReasons.some((r: string) => /intake assistant/.test(r)), "the agent's rationale is recorded");
     t.diagnostic(`filed ${c.ref}: ${c.title} (${c.severity}); facts: ${c.answers.map((a: any) => `${a.question}=${a.answer}`).join("; ")}`);
   });
@@ -61,8 +61,8 @@ describe("coordinator", () => {
     do {
       await sleep(5000);
       c = await morgan.must("getCase", { caseId });
-    } while (Date.now() < deadline && !c.ai.runs.some((r: any) => r.status !== "RUNNING"));
-    const run = c.ai.runs.find((r: any) => r.status !== "RUNNING");
+    } while (Date.now() < deadline && !c.ai.runs.some((r: any) => r.kind === "COORDINATOR" && r.status !== "RUNNING"));
+    const run = c.ai.runs.find((r: any) => r.kind === "COORDINATOR" && r.status !== "RUNNING");
     assert.ok(run, "a coordinator run finished");
     t.diagnostic(`run ${run.status} after ${run.trigger} in ${Math.round((run.durationMs ?? 0) / 1000)} s: ${run.steps.map((s: any) => s.summary).join(" | ")}`);
     assert.equal(run.status, "SUCCEEDED", run.error ?? "");

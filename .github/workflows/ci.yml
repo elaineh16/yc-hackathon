@@ -1,0 +1,74 @@
+# Relay CI. Unit tests and type-check, then the API suite and the browser journey against a real Wasp server
+# backed by Postgres. The agents are turned off here (no model in CI); the agent tests run locally against Ollama.
+name: ci
+
+on:
+  push:
+    branches: [main, relay-v1]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: relay
+          POSTGRES_PASSWORD: relay
+          POSTGRES_DB: relay
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U relay" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://relay:relay@localhost:5432/relay
+      LLM_DISABLED: "true"
+      RELAY_TEST_HOOKS: "true"
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+      - name: Install the Wasp CLI
+        run: npm i -g @wasp.sh/wasp-cli@0.22.0
+      - name: Environment
+        run: |
+          printf 'LLM_DISABLED=true\nRELAY_TEST_HOOKS=true\nRELAY_TIMEZONE=America/Toronto\n' > .env.server
+      - name: Compile (installs dependencies, builds the SDK)
+        run: wasp compile
+      - name: Type-check
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Unit tests
+        run: npx tsx --test tests/unit/*.test.ts
+      - name: Database
+        run: wasp db migrate-dev --name ci < /dev/null && wasp db seed < /dev/null
+      - name: Start the app
+        run: |
+          nohup wasp start > ../wasp.log 2>&1 &
+          for i in $(seq 1 120); do curl -sf localhost:3001/health && curl -sf -o /dev/null localhost:3000/login && exit 0; sleep 3; done
+          cat ../wasp.log; exit 1
+      - name: API tests
+        run: npx tsx --test --test-concurrency=1 tests/api/workflow.test.ts tests/api/reliability.test.ts
+      - name: Browser journey
+        working-directory: app/e2e
+        env:
+          PW_CHANNEL: chromium
+          RELAY_SHOTS_DIR: test-results/shots
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          mkdir -p test-results/shots
+          npx playwright test
+      - name: Logs and reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-ci-logs
+          path: |
+            wasp.log
+            app/e2e/test-results
+            app/e2e/report

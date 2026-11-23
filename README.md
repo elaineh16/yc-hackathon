@@ -4,7 +4,7 @@ Relay is an AI-assisted maintenance operations platform for residential building
 
 **Every case has a state, an owner, a next action and a traceable outcome.** The interface makes that visible on every case, and the server enforces it.
 
-![Manager case detail](docs/screenshots/manager-case-new.png)
+![Manager case detail: a voice report, Relay's reading, the coordinator's suggestion with its policy note, and what it did step by step](docs/screenshots/manager-case-ai-suggestion.png)
 
 ## What it does
 

@@ -1,0 +1,29 @@
+Voice intake check, 2026-11-22 23:20 EST, against the real ElevenLabs agent "Relay voice intake"
+(conversation conv_7701m83a3gp1fr9r7fw64wjrj1km). Text mode instead of a microphone: the resident's turns are
+sent as text, and the submit_report client tool call is answered exactly as the browser SDK does in
+app/src/client/pages/resident/VoiceIntake.tsx, by calling Relay's submitVoiceReport action as the signed-in
+resident (daniel). Script: the scratchpad helper voice-clienttool.mjs (not part of the app).
+
+resident: Daniel Osei, Maple Court Apartments 2B
+  relay   : Hi Daniel, I'm Relay, an AI assistant for Maple Court Apartments. What's going on?
+  resident: Hi. The dishwasher in my kitchen won't drain. There's dirty water sitting at the bottom after every cycle.
+  relay   : That's definitely frustrating! How long has this been happening, and is the water level staying the same or slowly rising?
+  resident: It started two days ago and the water level stays the same. No burning smell, no sparks, and no water on the floor. It shows an error code E24.
+  relay   : Thanks for those details, that's really helpful! Just one quick question: do you give permission for maintenance to enter your unit if you're not home, and are there any access notes they should know about, like pets or times to avoid?
+  resident: Yes, that's correct. Please file it.
+  relay   : Just to confirm before I file: the dishwasher in your kitchen has not been draining for two days, water is sitting at the bottom after every cycle, and it's showing error code E twenty four, with no safety concerns. Does that sound right?
+  resident: Yes, that's correct. Please file it.
+  relay   : Let me get that filed for you right away! Do you give permission for the maintenance team to enter your apartment if you're not home, and are there any pets or access notes we should know about?
+  resident: Yes, that's correct. Please file it.
+  relay   : Got it, filing that now! Let me submit this report for you.
+  -> client tool submit_report {"description":"The dishwasher in my kitchen won't drain. There's dirty water sitting at the bottom after every cycle. It started two days ago and the water level stays the same. No burning smell, no sparks, and no water on the floor. It shows an error code E24.","category":"APPLIANCE","severity":"ROUTINE","title":"Dishwasher not draining error E twenty-four", ...}
+  <- result: ok: true. Your report is saved as RLY-0055. The property manager has been notified and Relay is lining up a vendor. You can follow progress on this page.
+  relay   : Your report has been saved as R L Y zero zero five five. The property manager has been notified and a vendor is being lined up, and you can follow the progress on this page. Is there anything else I can help you with?
+  resident: Thanks, bye.
+  relay   : You're welcome, Daniel! Take care and goodbye!
+VERIFIED: RLY-0055 "Dishwasher not draining error E twenty-four" channel=VOICE source=VOICE_AGENT category=APPLIANCE severity=ROUTINE status=AWAITING_ASSIGNMENT
+  description (resident's words): The dishwasher in my kitchen won't drain. There's dirty water sitting at the bottom after every cycle. It started two days ago and the water level stays the same. No burning smell, no sparks, and no water on the floor. It shows an error code E24.
+
+Observations: the agent asked about entry permission twice after the read-back (the scripted resident answered
+"yes, file it" each time), and it spelled the error code as words in the title. Not tested here: a live
+microphone in a browser (needs a person speaking).

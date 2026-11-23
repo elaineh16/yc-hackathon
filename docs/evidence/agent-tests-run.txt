@@ -1,0 +1,22 @@
+# Agent tests against the real local model (qwen2.5:3b via Ollama, CPU only), 2026-11-22 23:31:07 EST
+$ npx tsx --test --test-concurrency=1 tests/api/agent.test.ts
+▶ intake agent
+  ✔ converses in natural language, then files the case only through the server (119197.786674ms)
+  ℹ relay: The kitchen sink is leaking, and it's dripping slowly. There's a small puddle in the cabinet. It's not reaching any electrical panels, outlets, or spreading across the floor. Have you been able to tur
+  ℹ relay: The kitchen sink is dripping right now, and you've turned off the valve under the sink. Is it still dripping? Have you noticed any other issues like a burning smell or smoke?
+  ℹ relay: Your report is saved as RLY-0078. The property manager has been notified and Relay is lining up a vendor. You can follow progress on this page.
+  ℹ filed RLY-0078: Kitchen Sink Leaking - Slow Drip (URGENT); facts: Where is the problem?=kitchen sink; Leaking now=Yes; Reaching outlets=No; Turned off at fixture=Yes; Spreading across floor=No; Reaching electrical panel=No
+✔ intake agent (119378.62175ms)
+▶ coordinator
+  ✔ wakes on the new case, reads it through tools, and every proposal passes policy (45431.042627ms)
+  ℹ run SUCCEEDED after READY_FOR_VENDOR in 43 s: Read the case | The safety rules found no hazard in the report, so this was saved as a suggestion for the manager. The case continues normally. | Listed 2 eligible vendors | Proposal saved. A manager will approve or reject offering the job to Harbour Plumbing & Drain. | Recorded an assessment
+  ℹ assessment: The kitchen sink is dripping slowly and the water has not spread across the floor or into outlets. The water has been turned off at the fixture. The leak is dripping and could potentially cause damage if not addressed. The case is ready for a vendor to be assigned.
+✔ coordinator (45431.622667ms)
+ℹ tests 2
+ℹ suites 2
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 165103.515937

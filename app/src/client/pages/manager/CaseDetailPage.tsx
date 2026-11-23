@@ -479,7 +479,7 @@ function AiPanel({ c }: { c: CaseDetail }) {
                   <li key={r.id} className="rounded-md border border-line p-3 text-xs">
                     <p className="flex flex-wrap items-center gap-2">
                       <Badge tone={r.status === "SUCCEEDED" ? "ok" : r.status === "RUNNING" ? "info" : "warn"}>{r.status.toLowerCase()}</Badge>
-                      <span className="font-medium">After: {r.trigger.toLowerCase().replace(/_/g, " ")}</span>
+                      <span className="font-medium">{r.kind === "INTAKE" ? "Intake conversation" : `After: ${r.trigger.toLowerCase().replace(/_/g, " ")}`}</span>
                       <span className="text-muted">
                         {when(r.createdAt)}
                         {r.durationMs ? `, ${Math.round(r.durationMs / 1000)} s` : ""}, {r.model}
@@ -520,7 +520,7 @@ function Suggestion({ p }: { p: AiProposalView }) {
       {a.error && <Notice tone="danger" className="mt-2">{a.error}</Notice>}
       <div className="mt-3 flex gap-2">
         <Button size="sm" busy={a.busy === "yes"} onClick={() => a.run("yes", () => decideSuggestion({ proposalId: p.id, accept: true, message: p.kind === "MESSAGE_RESIDENT" ? text : undefined }))}>
-          {p.kind === "ASSIGN_VENDOR" ? "Send this offer" : "Send message"}
+          {p.kind === "ASSIGN_VENDOR" ? "Send this offer" : p.kind === "ESCALATE" ? "Escalate" : "Send message"}
         </Button>
         <Button size="sm" variant="outline" busy={a.busy === "no"} onClick={() => a.run("no", () => decideSuggestion({ proposalId: p.id, accept: false }))}>
           Dismiss

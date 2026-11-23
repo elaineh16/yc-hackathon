@@ -243,6 +243,7 @@ async function caseAi(c: LoadedCase): Promise<CaseAi> {
     runs: runs.map(
       (r): AgentRunView => ({
         id: r.id,
+        kind: r.kind,
         trigger: r.trigger,
         status: r.status,
         model: r.model,

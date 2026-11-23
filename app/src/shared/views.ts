@@ -133,6 +133,8 @@ export type AiProposalView = {
 };
 export type AgentRunView = {
   id: string;
+  /** INTAKE: the conversation that filed the case. COORDINATOR: a review after an event. */
+  kind: "INTAKE" | "COORDINATOR";
   trigger: string;
   status: "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
   model: string;
@@ -262,4 +264,6 @@ export type VoiceCredential = {
   connectionType: "webrtc" | "websocket";
   conversationToken: string | null;
   signedUrl: string | null;
+  /** Passed to the voice agent so it can greet the resident and knows the unit. */
+  dynamicVariables: { resident_name: string; property_name: string; unit_label: string };
 };
