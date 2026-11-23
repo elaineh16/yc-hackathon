@@ -2,16 +2,20 @@
 // rows the caller is allowed to see; no embeddings service is needed.
 import { prisma } from "wasp/server";
 import { caseRef, CATEGORY_SHORT } from "../../shared/domain";
+import { residentSafeNotes } from "./intakePolicy";
 
 const STOP = new Set("a an and are at be but by for from has have i in is it its my of on or our so that the their there this to was we with you your not no do does did can will just me".split(" "));
 const terms = (s: string) =>
   [...new Set(s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w)).map((w) => w.replace(/(ing|ed|es|s)$/, "")))];
 
-/** The most relevant paragraphs of the property's notes for a query. */
-export async function searchKnowledge(propertyId: string, query: string, limit = 3) {
+/**
+ * The most relevant paragraphs of the property's notes for a query. Lines marked "STAFF ONLY:" (codes, keys,
+ * internal procedures) are never returned to a resident-facing agent.
+ */
+export async function searchKnowledge(propertyId: string, query: string, opts: { residentFacing: boolean } = { residentFacing: true }, limit = 3) {
   const p = await prisma.property.findUnique({ where: { id: propertyId }, select: { name: true, knowledge: true, emergencyInstructions: true } });
   if (!p) return { ok: false as const, error: "Property not found." };
-  const chunks = p.knowledge
+  const chunks = (opts.residentFacing ? residentSafeNotes(p.knowledge) : p.knowledge)
     .split(/\n\s*\n|\n(?=\s*[-*•])/)
     .map((c) => c.replace(/^\s*[-*•]\s*/, "").trim())
     .filter(Boolean);

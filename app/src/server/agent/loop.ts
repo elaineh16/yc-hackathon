@@ -1,7 +1,7 @@
 // A minimal tool-using agent loop. The model decides which tool to call; the server validates the arguments,
 // runs the tool, and feeds back the real result (including errors) until the model answers in plain text.
 // Every call is recorded in `steps` exactly as it happened.
-import { chat, type ChatMessage, type ToolSpec } from "./llm";
+import { chat, type ChatMessage, LlmUnavailable, type ToolSpec } from "./llm";
 
 export type ToolResult = { ok: boolean; [key: string]: unknown };
 export type Tool<A = Record<string, unknown>> = ToolSpec & {
@@ -30,13 +30,16 @@ const parseArgs = (raw: string): Record<string, unknown> | null => {
   }
 };
 
-export async function runLoop(system: string, history: ChatMessage[], tools: Tool<any>[], maxSteps = 6): Promise<LoopResult> {
+/** `deadlineAt` (epoch ms) bounds the whole loop: each model call gets only the time left, and none starts after it. */
+export async function runLoop(system: string, history: ChatMessage[], tools: Tool<any>[], maxSteps = 6, opts: { deadlineAt?: number } = {}): Promise<LoopResult> {
   const messages: ChatMessage[] = [{ role: "system", content: system }, ...history];
   const steps: Step[] = [];
   const byName = new Map(tools.map((t) => [t.name, t]));
   let nudged = false;
   for (let i = 0; i < maxSteps; i++) {
-    const reply = await chat(messages, tools);
+    const left = opts.deadlineAt ? opts.deadlineAt - Date.now() : undefined;
+    if (left !== undefined && left <= 0) throw new LlmUnavailable("timed out");
+    const reply = await chat(messages, tools, { timeoutMs: left });
     if (reply.toolCalls.length === 0) {
       const text = reply.content?.trim() || null;
       // Small models sometimes stop with an empty turn after using a tool. Ask once for the reply itself.

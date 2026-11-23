@@ -6,6 +6,7 @@ import { caseRef, type Category, CATEGORIES, CATEGORY_SHORT, formatMoney, type S
 import { canPerform } from "../../shared/machine";
 import { approvalRequired, overlaps } from "../../shared/triage";
 import { assertCaseAccess } from "../access";
+import { assertDispatchable } from "../vendors/directory";
 import {
   type ActorCtx,
   addEvent,
@@ -54,7 +55,8 @@ function parseSlots(raw: unknown, now: Date): { startAt: Date; endAt: Date }[] {
 }
 
 /** Cancels whatever is in flight with the current vendor: the offer or accepted job, its open windows, a pending approval. */
-async function releaseVendor(tx: Tx, c: LoadedCase, to: "WITHDRAWN" | "CANCELLED" | "REJECTED" | "EXPIRED", why: string): Promise<LoadedAssignment | null> {
+/** Ends the live offer or job on a case: slots cancelled, pending approvals void, and the vendor told. */
+export async function releaseVendor(tx: Tx, c: LoadedCase, to: "WITHDRAWN" | "CANCELLED" | "REJECTED" | "EXPIRED", why: string): Promise<LoadedAssignment | null> {
   const a = liveAssignment(c);
   if (!a) return null;
   await tx.vendorAssignment.update({ where: { id: a.id }, data: { status: to } });
@@ -111,16 +113,14 @@ export async function offerVendorTx(tx: Tx, c: LoadedCase, actor: ActorCtx, vend
   if (!canPerform("ASSIGN_VENDOR", c.status, actor.kind)) throw conflict(`A vendor cannot be assigned while the case is ${c.status}.`, "invalid_transition");
   if (liveAssignment(c)) throw conflict("This case already has a vendor offer in progress.", "already_offered");
   if (!isUuid(vendorId)) throw new HttpError(400, "Choose a vendor.");
-  const vendor = await tx.vendor.findUnique({ where: { id: vendorId } });
-  if (!vendor) throw new HttpError(400, "Choose a vendor.");
-  if (!vendor.approved) throw new HttpError(400, `${vendor.name} is not an approved vendor.`, { code: "vendor_not_approved" });
-  if (c.category !== "OTHER" && !vendor.trades.includes(c.category)) {
-    throw new HttpError(400, `${vendor.name} is not approved for ${CATEGORY_SHORT[c.category].toLowerCase()} work.`, { code: "vendor_wrong_trade" });
-  }
+  // Only a vendor approved at this property, for this trade. A discovered business is not a vendor until onboarded.
+  const vendor = await assertDispatchable(tx, c, vendorId);
   const respondByAt = new Date(Date.now() + c.property.vendorResponseMinutes * 60_000);
   const note = text(rawNote, 300) || null;
-  // offeredById records the person responsible: the manager, or for autopilot the property's first manager on record.
-  const offeredById = actor.userId ?? (await managerIds(tx, c.propertyId))[0] ?? c.residentId;
+  // offeredById records the person responsible: the manager, or for autopilot the property's first manager on record
+  // (the event itself is recorded as Relay AI's). Never the resident: a property without a manager gets no AI offers.
+  const offeredById = actor.userId ?? (await managerIds(tx, c.propertyId))[0];
+  if (offeredById === undefined) throw conflict("This property has no manager on record, so Relay AI cannot send offers for it.", "no_manager");
   const a = await tx.vendorAssignment.create({ data: { caseId: c.id, vendorId: vendor.id, offeredById, respondByAt, noteToVendor: note } });
   await move(tx, c, "ASSIGN_VENDOR", actor, {
     message: `${actor.kind === "AGENT" ? "Relay AI offered the job" : "Offered"} to ${vendor.name}. They have until ${fmtWhen(respondByAt)} to respond.`,
@@ -130,7 +130,8 @@ export async function offerVendorTx(tx: Tx, c: LoadedCase, actor: ActorCtx, vend
   const recipients = await notify(tx, await vendorUserIds(tx, vendor.id), c.id, `offer:${a.id}`, {
     kind: "JOB_OFFER",
     title: `New job offer: ${c.title}`,
-    body: `${ref(c)} at ${c.property.name}, ${c.unit.label}. Respond by ${fmtWhen(respondByAt)}.`,
+    body: `${ref(c)} at ${c.property.name}, ${c.unit.label}. Please accept or decline by ${fmtWhen(respondByAt)}. If there is no answer by then, the offer expires and the property manager assigns someone else.`,
+    ackBy: respondByAt,
   });
   if (recipients === 0) {
     await addEvent(tx, c.id, SYSTEM, { type: "NO_VENDOR_LOGIN", audience: "MANAGEMENT", message: `${vendor.name} has no Relay login, so nobody was notified. Contact them directly or assign another vendor.` });
@@ -223,12 +224,15 @@ export function resumeCase(actor: ActorCtx, input: { caseId: string; note: strin
     await assertCaseAccess(tx, actor, c);
     if (c.status === "AWAITING_ASSIGNMENT") return done(c, true);
     const severity = input.severity && (SEVERITIES as readonly string[]).includes(input.severity) && input.severity !== "EMERGENCY" ? input.severity : "URGENT";
-    await move(tx, c, "RESUME", actor, { message: `Escalation handled by ${actor.name}: ${note} The case continues as ${severity.toLowerCase()}.`, patch: { severity, needsReview: false } });
+    await move(tx, c, "RESUME", actor, { message: `Escalation handled by ${actor.name}: ${note} The case continues as ${severity.toLowerCase()}.`, patch: { severity, needsReview: false, emergency: false } });
     return done(c);
   });
 }
 
-/** The emergency was dealt with outside Relay. The resident is asked to confirm; only they can resolve it. */
+/**
+ * Handled without a vendor job: an emergency dealt with by emergency services or on-call staff, or a matter the
+ * manager handles directly (noise, a lockout let in by staff after checking identity). Only the resident can resolve it.
+ */
 export function markHandledOutside(actor: ActorCtx, input: { caseId: string; note: string }) {
   need("MANAGER", actor);
   const note = text(input.note, 300);
@@ -236,13 +240,20 @@ export function markHandledOutside(actor: ActorCtx, input: { caseId: string; not
   return withCase(input.caseId, async (tx, c) => {
     await assertCaseAccess(tx, actor, c);
     if (c.status === "AWAITING_VERIFICATION") return done(c, true);
+    if (liveAssignment(c)) throw conflict("A vendor is working on this case. Withdraw the offer or let the job finish first.", "vendor_on_case");
     const now = new Date();
+    const due = new Date(now.getTime() + c.property.verificationReminderMinutes * 60_000);
     await move(tx, c, "HANDLED_OUTSIDE", actor, {
-      message: `Handled outside Relay by ${actor.name}: ${note}`,
-      dueAt: new Date(now.getTime() + c.property.verificationReminderMinutes * 60_000),
-      patch: { verificationRequestedAt: now, verificationReminders: 0 },
+      message: `${c.status === "ESCALATED" ? "Handled outside Relay" : "Handled directly by management"} (${actor.name}): ${note}`,
+      dueAt: due,
+      patch: { verificationRequestedAt: now, verificationReminders: 0, needsReview: false },
     });
-    await notify(tx, [c.residentId], c.id, `verify:${now.getTime()}`, { kind: "ACTION", title: `Is this fixed? ${c.title}`, body: "Please confirm whether the problem is resolved." });
+    await notify(tx, [c.residentId], c.id, `verify:${now.getTime()}`, {
+      kind: "ACTION",
+      title: `Is this sorted? ${c.title}`,
+      body: `${actor.name} says this was handled: ${note} Please confirm whether it is resolved, or tell us it is not.`,
+      ackBy: due,
+    });
     return done(c);
   });
 }
@@ -341,13 +352,19 @@ export async function respondToOffer(actor: ActorCtx, input: OfferResponse): Pro
           : "The vendor needs to inspect before pricing, so a manager must approve a maximum."
         : `${formatMoney(cents!)} is within this property's ${formatMoney(threshold)} approval threshold: approved by policy.`,
     });
-    await addEvent(tx, c.id, SYSTEM, { type: "VENDOR_ACCEPTED_NOTICE", message: `${a.vendor.name} took the job and proposed visit times.` });
+    await addEvent(tx, c.id, SYSTEM, { type: "VENDOR_ACCEPTED_NOTICE", message: `${a.vendor.name} took the job and proposed visit times.`, vendorId: a.vendorId });
     await notify(tx, managers, c.id, `accepted:${a.id}`, {
       kind: needsApproval ? "ACTION" : "UPDATE",
       title: needsApproval ? `Approval needed: ${c.title}` : `${a.vendor.name} accepted ${ref(c)}`,
       body: needsApproval ? `${a.vendor.name} quoted ${priced}.` : `Estimate ${formatMoney(cents!)} approved by policy.`,
     });
-    await notify(tx, [c.residentId], c.id, `times:${approval.id}`, { kind: "ACTION", title: `Choose a visit time for ${c.title}`, body: `${a.vendor.name} proposed ${slots.length} time${slots.length === 1 ? "" : "s"}.` });
+    const answerBy = new Date(now.getTime() + c.property.residentResponseMinutes * 60_000);
+    await notify(tx, [c.residentId], c.id, `times:${approval.id}`, {
+      kind: "ACTION",
+      title: `Choose a visit time for ${c.title}`,
+      body: `${a.vendor.name} proposed ${slots.length} time${slots.length === 1 ? "" : "s"}. Choose one, or tell us none of them work, by ${fmtWhen(answerBy)}. If we do not hear back, your property manager will follow up.`,
+      ackBy: answerBy,
+    });
     return done(c);
   });
   if (result === "expired") throw conflict("This offer expired before you responded.", "offer_expired");
@@ -364,7 +381,7 @@ export function proposeSlots(actor: ActorCtx, input: { caseId: string; slots: Sl
     const slots = parseSlots(input.slots, new Date());
     if (slots.length === 0) throw new HttpError(400, "Propose at least one visit time.");
     await tx.appointmentSlot.createMany({ data: slots.map((s) => ({ caseId: c.id, assignmentId: a.id, vendorId: a.vendorId, startAt: s.startAt, endAt: s.endAt, proposedById: actor.userId! })) });
-    await addEvent(tx, c.id, actor, { type: "SLOTS_PROPOSED", message: `${a.vendor.name} proposed ${slots.length} more visit time${slots.length === 1 ? "" : "s"}.` });
+    await addEvent(tx, c.id, actor, { type: "SLOTS_PROPOSED", message: `${a.vendor.name} proposed ${slots.length} more visit time${slots.length === 1 ? "" : "s"}.`, vendorId: a.vendorId });
     if (c.status === "SCHEDULING") await refreshOwnership(tx, c, true);
     await notify(tx, [c.residentId], c.id, `times:${Date.now()}`, { kind: "ACTION", title: `New visit times for ${c.title}`, body: `${a.vendor.name} proposed ${slots.length} time${slots.length === 1 ? "" : "s"}.` });
     return done(c);
@@ -379,7 +396,7 @@ export function startWork(actor: ActorCtx, input: { caseId: string }) {
     if (!a || a.vendorId !== actor.vendorId) throw notFound();
     if (c.status === "IN_PROGRESS") return done(c, true);
     await tx.vendorAssignment.update({ where: { id: a.id }, data: { startedAt: new Date() } });
-    await move(tx, c, "START_WORK", actor, { message: `${a.vendor.name} started work.` });
+    await move(tx, c, "START_WORK", actor, { message: `${a.vendor.name} started work.`, vendorId: a.vendorId });
     await notify(tx, [c.residentId], c.id, `started:${a.id}`, { kind: "UPDATE", title: `Work started: ${c.title}`, body: `${a.vendor.name} is working on it.` });
     return done(c);
   });
@@ -393,7 +410,7 @@ export function addProgressNote(actor: ActorCtx, input: { caseId: string; note: 
     await assertCaseAccess(tx, actor, c);
     const a = liveAssignment(c);
     if (!a || a.vendorId !== actor.vendorId || !["SCHEDULED", "IN_PROGRESS"].includes(c.status)) throw conflict("Updates can be added once the visit is scheduled or under way.");
-    await addEvent(tx, c.id, actor, { type: "PROGRESS_NOTE", message: `${a.vendor.name}: ${note}` });
+    await addEvent(tx, c.id, actor, { type: "PROGRESS_NOTE", message: `${a.vendor.name}: ${note}`, vendorId: a.vendorId });
     return done(c);
   });
 }
@@ -413,6 +430,7 @@ export function completeWork(actor: ActorCtx, input: { caseId: string; notes: st
     const now = new Date();
     await tx.vendorAssignment.update({ where: { id: a.id }, data: { status: "COMPLETED", completedAt: now, completionNotes: notes, finalCostCents: finalCost } });
     await move(tx, c, "COMPLETE_WORK", actor, {
+      vendorId: a.vendorId,
       message: `${a.vendor.name} reported the work complete: ${notes}`,
       dueAt: new Date(now.getTime() + c.property.verificationReminderMinutes * 60_000),
       patch: { verificationRequestedAt: now, verificationReminders: 0 },
@@ -424,8 +442,91 @@ export function completeWork(actor: ActorCtx, input: { caseId: string; notes: st
       await addEvent(tx, c.id, SYSTEM, { type: "OVER_APPROVED_CAP", audience: "MANAGEMENT", message: `Final cost ${formatMoney(finalCost)} is over the approved maximum of ${formatMoney(cap)}. Review before paying.` });
       await notify(tx, managers, c.id, `overcap:${a.id}`, { kind: "ACTION", title: `Over the approved amount: ${ref(c)}`, body: `${a.vendor.name} reported ${formatMoney(finalCost)} against an approved ${formatMoney(cap)}.` });
     }
-    await notify(tx, [c.residentId], c.id, `verify:${a.id}`, { kind: "ACTION", title: `Is this fixed? ${c.title}`, body: `${a.vendor.name} says the work is done. Please confirm.` });
+    await notify(tx, [c.residentId], c.id, `verify:${a.id}`, {
+      kind: "ACTION",
+      title: `Is this fixed? ${c.title}`,
+      body: `${a.vendor.name} says the work is done. Please answer "Yes, resolved" or "No, still having problems". If it is not fixed, the case reopens and your property manager follows up.`,
+      ackBy: new Date(now.getTime() + c.property.verificationReminderMinutes * 60_000),
+    });
     await notify(tx, managers, c.id, `completed:${a.id}`, { kind: "UPDATE", title: `Work reported complete: ${ref(c)}`, body: "Waiting for the resident to confirm." });
+    return done(c);
+  });
+}
+
+/**
+ * The contractor asks to raise the approved amount mid-job (for example a part turned out to be needed). Only a
+ * manager can decide; Relay's AI can summarise it but never approve it. The case status does not change.
+ */
+export function requestMoreBudget(actor: ActorCtx, input: { caseId: string; additionalCents: number; reason: string }) {
+  need("CONTRACTOR", actor);
+  const reason = text(input.reason, 500);
+  const extra = input.additionalCents;
+  if (!Number.isInteger(extra) || extra <= 0 || extra > 10_000_000) throw new HttpError(400, "Enter the additional amount you need.", { code: "amount_required" });
+  if (reason.length < 5) throw new HttpError(400, "Explain what the extra money is for.");
+  return withCase(input.caseId, async (tx, c) => {
+    await assertCaseAccess(tx, actor, c);
+    const a = liveAssignment(c);
+    if (!a || a.vendorId !== actor.vendorId || a.status !== "ACCEPTED") throw notFound();
+    if (!["SCHEDULING", "SCHEDULED", "IN_PROGRESS"].includes(c.status)) throw conflict(`A budget change cannot be requested now (${c.status}).`);
+    const approval = a.approval;
+    if (!approval || !["APPROVED", "AUTO_APPROVED"].includes(approval.status)) throw conflict("The original estimate has not been approved yet.", "not_approved_yet");
+    if (a.changeRequestStatus === "PENDING") {
+      if (a.changeRequestCents === extra) return done(c, true);
+      throw conflict("A budget change is already waiting for the manager.", "budget_request_pending");
+    }
+    const cap = approval.capCents ?? approval.amountCents ?? 0;
+    await tx.vendorAssignment.update({ where: { id: a.id }, data: { changeRequestCents: extra, changeRequestReason: reason, changeRequestStatus: "PENDING", changeRequestedAt: new Date(), changeDecidedAt: null, changeDecidedById: null } });
+    const eventId = await addEvent(tx, c.id, actor, {
+      type: "BUDGET_CHANGE_REQUESTED",
+      audience: "VENDOR",
+      vendorId: a.vendorId,
+      message: `${a.vendor.name} asked for ${formatMoney(extra)} more than the approved ${formatMoney(cap)} (new total ${formatMoney(cap + extra)}): ${reason}`,
+    });
+    await flagForCoordinator(tx, c.id, "CHANGE_REQUESTED", eventId);
+    await notify(tx, await managerIds(tx, c.propertyId), c.id, `budget-request:${a.id}:${Date.now()}`, {
+      kind: "ACTION",
+      title: `Approval needed: ${a.vendor.name} asks for ${formatMoney(extra)} more on ${ref(c)}`,
+      body: `${reason} Approve or decline. Nothing above the approved ${formatMoney(cap)} is authorised until you decide.`,
+      ackBy: new Date(Date.now() + 24 * 3600_000),
+    });
+    return done(c);
+  });
+}
+
+/** The manager approves or declines a contractor's request for more money. Approval raises the cap; nothing else. */
+export function decideBudgetRequest(actor: ActorCtx, input: { caseId: string; approve: boolean; note?: string }) {
+  need("MANAGER", actor);
+  return withCase(input.caseId, async (tx, c) => {
+    await assertCaseAccess(tx, actor, c);
+    const a = liveAssignment(c);
+    if (!a || !a.approval) throw conflict("There is no budget request on this case.");
+    if (a.changeRequestStatus !== "PENDING") {
+      const same = (input.approve && a.changeRequestStatus === "APPROVED") || (!input.approve && a.changeRequestStatus === "REJECTED");
+      if (same) return done(c, true);
+      throw conflict("There is no budget request waiting for a decision.", "no_budget_request");
+    }
+    const note = text(input.note, 300);
+    const extra = a.changeRequestCents ?? 0;
+    const cap = a.approval.capCents ?? a.approval.amountCents ?? 0;
+    const now = new Date();
+    if (input.approve) {
+      await tx.spendApproval.update({ where: { id: a.approval.id }, data: { capCents: cap + extra, note: `Raised by ${actor.name} from ${formatMoney(cap)} to ${formatMoney(cap + extra)}${note ? `: ${note}` : ""}` } });
+    }
+    await tx.vendorAssignment.update({ where: { id: a.id }, data: { changeRequestStatus: input.approve ? "APPROVED" : "REJECTED", changeDecidedAt: now, changeDecidedById: actor.userId } });
+    await addEvent(tx, c.id, actor, {
+      type: input.approve ? "BUDGET_CHANGE_APPROVED" : "BUDGET_CHANGE_REJECTED",
+      audience: "VENDOR",
+      vendorId: a.vendorId,
+      message: input.approve
+        ? `${actor.name} approved ${formatMoney(extra)} more for ${a.vendor.name}: the approved maximum is now ${formatMoney(cap + extra)}${note ? `. ${note}` : "."}`
+        : `${actor.name} declined the request for ${formatMoney(extra)} more. The approved maximum stays ${formatMoney(cap)}${note ? `: ${note}` : "."}`,
+    });
+    await notify(tx, await vendorUserIds(tx, a.vendorId), c.id, `budget-decided:${a.id}:${now.getTime()}`, {
+      kind: input.approve ? "APPROVED" : "UPDATE",
+      email: true,
+      title: input.approve ? `Approved: ${formatMoney(extra)} more for ${ref(c)}` : `Not approved: extra budget for ${ref(c)}`,
+      body: input.approve ? `The approved maximum is now ${formatMoney(cap + extra)}.` : `Stay within ${formatMoney(cap)}, or stop and report back to the manager.${note ? ` ${note}` : ""}`,
+    });
     return done(c);
   });
 }
@@ -444,7 +545,7 @@ async function confirmSlot(tx: Tx, c: LoadedCase, a: LoadedAssignment, slot: Loa
     await tx.appointmentSlot.update({ where: { id: slot.id }, data: { status: "UNAVAILABLE" } });
     slot.status = "UNAVAILABLE";
     const stillOpen = openSlots(a).length > 0;
-    await addEvent(tx, c.id, SYSTEM, { type: "SLOT_UNAVAILABLE", message: `${fmtWindow(slot.startAt, slot.endAt)} is no longer available${clashes.some((x) => x.vendorId === a.vendorId) ? ` for ${a.vendor.name}` : ""}.` });
+    await addEvent(tx, c.id, SYSTEM, { type: "SLOT_UNAVAILABLE", message: `${fmtWindow(slot.startAt, slot.endAt)} is no longer available${clashes.some((x) => x.vendorId === a.vendorId) ? ` for ${a.vendor.name}` : ""}.`, vendorId: a.vendorId });
     if (c.status === "SCHEDULING") await refreshOwnership(tx, c, stillOpen);
     await notify(tx, await vendorUserIds(tx, a.vendorId), c.id, `clash:${slot.id}`, { kind: "ACTION", title: `Propose new times: ${ref(c)}`, body: "A chosen time clashed with another booking." });
     return false;
@@ -453,9 +554,9 @@ async function confirmSlot(tx: Tx, c: LoadedCase, a: LoadedAssignment, slot: Loa
   await tx.appointmentSlot.update({ where: { id: slot.id }, data: { status: "CONFIRMED", confirmedAt: now } });
   await tx.appointmentSlot.updateMany({ where: { assignmentId: a.id, id: { not: slot.id }, status: { in: ["PROPOSED", "ACCEPTED"] } }, data: { status: "SUPERSEDED" } });
   for (const s of a.slots) s.status = s.id === slot.id ? "CONFIRMED" : s.status === "PROPOSED" || s.status === "ACCEPTED" ? "SUPERSEDED" : s.status;
-  await move(tx, c, "CONFIRM_APPOINTMENT", by, { message: `Visit confirmed with ${a.vendor.name}: ${fmtWindow(slot.startAt, slot.endAt)}.`, dueAt: slot.startAt });
+  await move(tx, c, "CONFIRM_APPOINTMENT", by, { message: `Visit confirmed with ${a.vendor.name}: ${fmtWindow(slot.startAt, slot.endAt)}.`, dueAt: slot.startAt, vendorId: a.vendorId });
   const body = `${a.vendor.name}, ${fmtWindow(slot.startAt, slot.endAt)}, ${c.unit.label}.`;
-  await notify(tx, [...(await vendorUserIds(tx, a.vendorId)), ...(await managerIds(tx, c.propertyId)), c.residentId], c.id, `confirmed:${slot.id}`, { kind: "UPDATE", title: `Visit confirmed: ${c.title}`, body });
+  await notify(tx, [...(await vendorUserIds(tx, a.vendorId)), ...(await managerIds(tx, c.propertyId)), c.residentId], c.id, `confirmed:${slot.id}`, { kind: "UPDATE", email: true, title: `Visit confirmed: ${c.title}`, body });
   return true;
 }
 
@@ -481,7 +582,7 @@ export async function answerSlot(actor: ActorCtx, input: { slotId: string }): Pr
     if (!settled || c.status === "AWAITING_APPROVAL") {
       if (slot.status === "ACCEPTED") return { ...done(c, true), confirmed: false };
       await tx.appointmentSlot.update({ where: { id: slot.id }, data: { status: "ACCEPTED", residentAnsweredAt: new Date() } });
-      await addEvent(tx, c.id, actor, { type: "SLOT_CHOSEN", message: `${actor.name} chose ${fmtWindow(slot.startAt, slot.endAt)}. It will be confirmed once the manager approves the estimate.` });
+      await addEvent(tx, c.id, actor, { type: "SLOT_CHOSEN", message: `${actor.name} chose ${fmtWindow(slot.startAt, slot.endAt)}. It will be confirmed once the manager approves the estimate.`, vendorId: slot.vendorId });
       return { ...done(c), confirmed: false };
     }
     await tx.appointmentSlot.update({ where: { id: slot.id }, data: { residentAnsweredAt: new Date() } });
@@ -502,7 +603,7 @@ export function declineSlots(actor: ActorCtx, input: { caseId: string; note?: st
     if (!a || open.length === 0) throw conflict("There are no visit times waiting for your answer.");
     const note = text(input.note, 300);
     await tx.appointmentSlot.updateMany({ where: { id: { in: open.map((s) => s.id) } }, data: { status: "DECLINED", residentAnsweredAt: new Date() } });
-    const eventId = await addEvent(tx, c.id, actor, { type: "SLOTS_DECLINED", message: `${actor.name} cannot make the proposed times${note ? `: ${note}` : "."}` });
+    const eventId = await addEvent(tx, c.id, actor, { type: "SLOTS_DECLINED", message: `${actor.name} cannot make the proposed times${note ? `: ${note}` : "."}`, vendorId: a.vendorId });
     await flagForCoordinator(tx, c.id, "TIMES_DECLINED", eventId);
     if (c.status === "SCHEDULING") await refreshOwnership(tx, c, false);
     await notify(tx, await vendorUserIds(tx, a.vendorId), c.id, `declined-times:${Date.now()}`, { kind: "ACTION", title: `Propose new times: ${ref(c)}`, body: note || "The resident cannot make the proposed times." });

@@ -43,14 +43,16 @@ export async function llmStatus(): Promise<{ available: boolean; model: string; 
       if (!ok) reason = `The model ${cfg.model} is not installed on the model server.`;
     }
   } catch {
-    reason = `No model server is reachable at ${cfg.baseUrl}.`;
+    // The address stays in the server log: this reason is shown to every role and recorded on cases.
+    reason = "The model server is not reachable.";
+    if (!health || health.ok) console.warn(`[llm] no model server is reachable at ${cfg.baseUrl}`);
   }
   health = { at: Date.now(), ok, reason };
   return { available: ok, model: cfg.model, reason };
 }
 
 /** One chat-completions call. Throws LlmUnavailable on any transport or server failure. */
-export async function chat(messages: ChatMessage[], tools: ToolSpec[], opts: { temperature?: number; maxTokens?: number } = {}) {
+export async function chat(messages: ChatMessage[], tools: ToolSpec[], opts: { temperature?: number; maxTokens?: number; timeoutMs?: number } = {}) {
   const cfg = llmConfig();
   if (cfg.disabled) throw new LlmUnavailable("turned off");
   let res: Response;
@@ -66,7 +68,8 @@ export async function chat(messages: ChatMessage[], tools: ToolSpec[], opts: { t
         max_tokens: opts.maxTokens ?? 700,
         stream: false,
       }),
-      signal: AbortSignal.timeout(cfg.timeoutMs),
+      // A caller with its own deadline (an intake turn) may allow less time than the configured limit, never more.
+      signal: AbortSignal.timeout(Math.max(1_000, Math.min(cfg.timeoutMs, opts.timeoutMs ?? cfg.timeoutMs))),
     });
   } catch (e) {
     health = { at: Date.now(), ok: false, reason: "The model server stopped answering." };

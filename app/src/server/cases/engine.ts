@@ -6,7 +6,7 @@
 // If any step fails, nothing is saved.
 import type { Prisma } from "@prisma/client";
 import { HttpError, prisma } from "wasp/server";
-import type { Actor, CaseStatus } from "../../shared/domain";
+import { type Actor, type CaseStatus, managerHandled } from "../../shared/domain";
 import { type Action, assertTransition, ownership, TransitionError } from "../../shared/machine";
 import { mark } from "../tracing";
 
@@ -111,7 +111,7 @@ export async function move(tx: Tx, c: LoadedCase, action: Action, actor: ActorCt
     throw e;
   }
   const from = c.status;
-  const own = ownership(to, { openSlots: o.hasOpenSlots });
+  const own = ownership(to, { openSlots: o.hasOpenSlots, managerHandled: managerHandled(c.category) });
   const now = new Date();
   const eventId = await addEvent(tx, c.id, actor, { type: action, message: o.message, fromStatus: from, toStatus: to, audience: o.audience, vendorId: o.vendorId, data: o.data });
   // The coordinator never wakes itself: its own actions are not triggers.
@@ -135,21 +135,12 @@ export async function move(tx: Tx, c: LoadedCase, action: Action, actor: ActorCt
 
 /** Re-derives who holds the case when the status stays the same (for example new visit times were proposed). */
 export async function refreshOwnership(tx: Tx, c: LoadedCase, hasOpenSlots: boolean, dueAt?: Date | null) {
-  const own = ownership(c.status, { openSlots: hasOpenSlots });
+  const own = ownership(c.status, { openSlots: hasOpenSlots, managerHandled: managerHandled(c.category) });
   await tx.case.update({ where: { id: c.id }, data: { holder: own.holder, nextAction: own.nextAction, ...(dueAt !== undefined ? { nextActionDueAt: dueAt } : {}) } });
 }
 
-type Notice = { kind: string; title: string; body: string };
-/** One in-app notification per recipient per event. Returns how many recipients there were. */
-export async function notify(tx: Tx, userIds: number[], caseId: string, eventKey: string, n: Notice): Promise<number> {
-  const unique = [...new Set(userIds)];
-  if (unique.length === 0) return 0;
-  await tx.notification.createMany({
-    data: unique.map((userId) => ({ userId, caseId, kind: n.kind, title: n.title, body: n.body, dedupeKey: `${caseId}:${eventKey}:${userId}` })),
-    skipDuplicates: true,
-  });
-  return unique.length;
-}
+/** One notification per recipient per event and channel (in-app always; email when warranted). See notify/notify.ts. */
+export { notify, type Notice } from "../notify/notify";
 
 export async function managerIds(tx: Tx, propertyId: string): Promise<number[]> {
   const rows = await tx.propertyMembership.findMany({ where: { propertyId, user: { role: "MANAGER" } }, select: { userId: true } });

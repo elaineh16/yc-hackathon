@@ -37,8 +37,9 @@ export const TRANSITIONS: Record<Action, Rule> = {
     by: ["SYSTEM", "MANAGER", "AGENT"],
   },
   RESUME: { from: ["ESCALATED"], to: ["AWAITING_ASSIGNMENT"], by: ["MANAGER"] },
-  // The emergency was dealt with outside Relay (emergency services, on-call staff): ask the resident to confirm.
-  HANDLED_OUTSIDE: { from: ["ESCALATED"], to: ["AWAITING_VERIFICATION"], by: ["MANAGER"] },
+  // Dealt with outside Relay's vendor flow: an emergency handled by emergency services or on-call staff, or a matter
+  // the manager handles directly (noise, a lockout let in by staff). The resident is asked to confirm.
+  HANDLED_OUTSIDE: { from: ["ESCALATED", "TRIAGED", "AWAITING_ASSIGNMENT", "REOPENED"], to: ["AWAITING_VERIFICATION"], by: ["MANAGER"] },
   // AGENT only when the property turned on autopilot for routine cases (checked by the coordinator's policy).
   ASSIGN_VENDOR: { from: ["AWAITING_ASSIGNMENT", "REOPENED"], to: ["AWAITING_VENDOR"], by: ["MANAGER", "AGENT"] },
   WITHDRAW_OFFER: { from: ["AWAITING_VENDOR"], to: ["AWAITING_ASSIGNMENT"], by: ["MANAGER"] },
@@ -91,14 +92,14 @@ export function assertTransition(action: Action, from: CaseStatus, by: Actor, to
 export const canPerform = (action: Action, from: CaseStatus, by: Actor) => TRANSITIONS[action].by.includes(by) && TRANSITIONS[action].from.includes(from);
 
 /** Who holds the case in each status, and what they are expected to do next. */
-export function ownership(status: CaseStatus, facts: { openSlots?: boolean } = {}): { holder: Holder; nextAction: string } {
+export function ownership(status: CaseStatus, facts: { openSlots?: boolean; managerHandled?: boolean } = {}): { holder: Holder; nextAction: string } {
   switch (status) {
     case "NEW":
       return { holder: "SYSTEM", nextAction: "Triage the report" };
     case "TRIAGED":
       return { holder: "MANAGER", nextAction: "Review the report and route it" };
     case "AWAITING_ASSIGNMENT":
-      return { holder: "MANAGER", nextAction: "Assign an approved vendor" };
+      return { holder: "MANAGER", nextAction: facts.managerHandled ? "Handle it directly (no vendor needed)" : "Assign an approved vendor" };
     case "AWAITING_VENDOR":
       return { holder: "CONTRACTOR", nextAction: "Respond to the job offer" };
     case "AWAITING_APPROVAL":
@@ -114,7 +115,7 @@ export function ownership(status: CaseStatus, facts: { openSlots?: boolean } = {
     case "ESCALATED":
       return { holder: "MANAGER", nextAction: "Handle the escalation" };
     case "REOPENED":
-      return { holder: "MANAGER", nextAction: "Review and assign a vendor again" };
+      return { holder: "MANAGER", nextAction: facts.managerHandled ? "Review and follow up again" : "Review and assign a vendor again" };
     case "RESOLVED":
     case "CANCELLED":
       return { holder: "NONE", nextAction: "" };

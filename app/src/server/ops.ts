@@ -1,6 +1,7 @@
 // Wasp queries and actions (declared in main.wasp). Thin on purpose: each one identifies the caller, checks the
-// role, and hands over to the case engine or an agent, which do the object-level checks and enforce the rules.
-// After a write commits, kickCoordinator() wakes the coordinator if the write left a trigger for it.
+// role, and hands over to the case engine, an agent or a service, which do the object-level checks and enforce rules.
+// After a write commits: the actor's open notifications on that case are acknowledged (acting is acknowledging),
+// the coordinator wakes if the write left a trigger, and any email that became due is sent, all outside the transaction.
 import { prisma } from "wasp/server";
 import type { Category, Severity } from "../shared/domain";
 import type { AiStatus, CaseFilters, Me } from "../shared/views";
@@ -11,15 +12,28 @@ import { llmStatus } from "./agent/llm";
 import * as flow from "./cases/flow";
 import { createCase, type IntakeInput } from "./cases/intake";
 import * as read from "./cases/read";
+import { emailConfig } from "./notify/config";
+import { useLimit } from "./limits";
+import { kickEmail } from "./notify/email";
+import { acknowledgeForCase } from "./notify/notify";
 import * as settings from "./settings";
+import * as discovery from "./vendors/discovery";
 import { voiceConfigured, voiceCredential } from "./voice";
 
-/** Runs a write, then wakes the coordinator for the case it touched. */
-async function write<T extends { caseId?: string | null }>(p: Promise<T>): Promise<T> {
+/** Runs a write, then does the after-commit work for the case it touched. */
+async function write<T extends { caseId?: string | null }>(p: Promise<T>, actorUserId?: number): Promise<T> {
   const r = await p;
+  if (r?.caseId && actorUserId) await acknowledgeForCase(prisma, actorUserId, r.caseId).catch(() => undefined);
   void kickCoordinator(r?.caseId);
+  kickEmail();
   return r;
 }
+const resumeAll = async <T extends { resumed?: string[] }>(p: Promise<T>) => {
+  const r = await p;
+  for (const id of r.resumed ?? []) void kickCoordinator(id);
+  kickEmail();
+  return r;
+};
 
 // ───────────────────────── everyone ─────────────────────────
 
@@ -33,6 +47,7 @@ export const getMe = async (_args: void, ctx: Ctx): Promise<Me> => {
       memberships: { include: { property: { select: { id: true, name: true } } } },
     },
   });
+  const ec = emailConfig();
   return {
     id: user.id,
     name: user.displayName,
@@ -42,6 +57,9 @@ export const getMe = async (_args: void, ctx: Ctx): Promise<Me> => {
     units: user.residencies.map((r) => ({ id: r.unit.id, label: r.unit.label, propertyId: r.unit.propertyId, propertyName: r.unit.property.name, address: r.unit.property.address })),
     properties: user.memberships.map((m) => m.property),
     voiceAvailable: actor.kind === "RESIDENT" && voiceConfigured(),
+    email: user.email,
+    emailNotifications: user.emailNotifications,
+    emailChannel: { configured: ec.enabled, capture: ec.capture },
   };
 };
 export const getAiStatus = async (_args: void, ctx: Ctx): Promise<AiStatus> => {
@@ -51,52 +69,110 @@ export const getAiStatus = async (_args: void, ctx: Ctx): Promise<AiStatus> => {
 export const getCase = async (args: { caseId: string }, ctx: Ctx) => read.caseDetail(actorOf(ctx), args?.caseId);
 export const getNotifications = async (_args: void, ctx: Ctx) => read.inbox(actorOf(ctx));
 export const markNotificationsRead = async (args: { ids?: string[] } | void, ctx: Ctx) => read.markRead(actorOf(ctx), args?.ids);
+export const acknowledgeNotification = async (args: { id: string }, ctx: Ctx) => read.acknowledge(actorOf(ctx), args?.id);
+export const updateMyNotifications = async (args: { email?: string | null; emailNotifications?: boolean }, ctx: Ctx) => settings.updateMyNotifications(actorOf(ctx), args ?? {});
 
 // ───────────────────────── resident ─────────────────────────
 
 /** The fallback form: works with no AI at all. */
-export const reportIssue = async (args: IntakeInput, ctx: Ctx) => write(createCase(requireRole(ctx, "RESIDENT"), { ...args, channel: "TEXT", agent: undefined }));
-export const getIntakeConversation = async (args: { unitId: string; fresh?: boolean }, ctx: Ctx) => getConversation(requireRole(ctx, "RESIDENT"), args);
-export const sendIntakeMessage = async (args: { conversationId: string; text: string }, ctx: Ctx) => write(sendIntakeMessageFn(requireRole(ctx, "RESIDENT"), args));
-export const submitVoiceReport = async (args: Record<string, unknown>, ctx: Ctx) => write(submitVoiceReportFn(requireRole(ctx, "RESIDENT"), args));
-export const startVoiceIntake = async (args: { unitId?: string } | void, ctx: Ctx) => voiceCredential(requireRole(ctx, "RESIDENT"), args?.unitId);
+export const reportIssue = async (args: IntakeInput, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  useLimit("reports", a.userId);
+  return write(createCase(a, { ...args, channel: "TEXT", agent: undefined, intakeGroup: undefined }));
+};
+export const getIntakeConversation = async (args: { unitId: string; fresh?: boolean; conversationId?: string }, ctx: Ctx) => getConversation(requireRole(ctx, "RESIDENT"), args);
+/** Saves the message and returns at once; Relay's reply is produced by a background job. */
+export const sendIntakeMessage = async (args: { conversationId: string; text: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  useLimit("chat", a.userId);
+  return sendIntakeMessageFn(a, args);
+};
+export const submitVoiceReport = async (args: Record<string, unknown>, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  useLimit("reports", a.userId);
+  return write(submitVoiceReportFn(a, args));
+};
+/** Each call opens a billable voice session, so it is limited per resident. */
+export const startVoiceIntake = async (args: { unitId?: string } | void, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  useLimit("voice", a.userId);
+  return voiceCredential(a, args?.unitId);
+};
 export const getMyCases = async (_args: void, ctx: Ctx) => (await read.listCases(requireRole(ctx, "RESIDENT"), { pageSize: 100, sort: "updated" })).items;
-export const chooseVisitTime = async (args: { slotId: string }, ctx: Ctx) => write(flow.answerSlot(requireRole(ctx, "RESIDENT"), args));
-export const declineVisitTimes = async (args: { caseId: string; note?: string }, ctx: Ctx) => write(flow.declineSlots(requireRole(ctx, "RESIDENT"), args));
-export const confirmResolution = async (args: { caseId: string; resolved: boolean; note?: string }, ctx: Ctx) => write(flow.verifyResolution(requireRole(ctx, "RESIDENT"), args));
+export const chooseVisitTime = async (args: { slotId: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  return write(flow.answerSlot(a, args), a.userId);
+};
+export const declineVisitTimes = async (args: { caseId: string; note?: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  return write(flow.declineSlots(a, args), a.userId);
+};
+export const confirmResolution = async (args: { caseId: string; resolved: boolean; note?: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  return write(flow.verifyResolution(a, args), a.userId);
+};
 
 // ───────────────────────── resident or manager ─────────────────────────
 
-export const reopenCase = async (args: { caseId: string; reason: string }, ctx: Ctx) => write(flow.reopenCase(requireRole(ctx, "RESIDENT", "MANAGER"), args));
-export const cancelCase = async (args: { caseId: string; reason?: string }, ctx: Ctx) => write(flow.cancelCase(requireRole(ctx, "RESIDENT", "MANAGER"), args));
-export const cancelVisit = async (args: { caseId: string; reason: string }, ctx: Ctx) => write(flow.cancelAppointment(actorOf(ctx), args));
+export const reopenCase = async (args: { caseId: string; reason: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT", "MANAGER");
+  return write(flow.reopenCase(a, args), a.userId);
+};
+export const cancelCase = async (args: { caseId: string; reason?: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT", "MANAGER");
+  return write(flow.cancelCase(a, args), a.userId);
+};
+export const cancelVisit = async (args: { caseId: string; reason: string }, ctx: Ctx) => {
+  const a = actorOf(ctx);
+  return write(flow.cancelAppointment(a, args), a.userId);
+};
 
 // ───────────────────────── manager ─────────────────────────
 
-export const getCommandCenter = async (_args: void, ctx: Ctx) => read.commandCenter(requireRole(ctx, "MANAGER"));
-export const searchCases = async (args: CaseFilters | void, ctx: Ctx) => read.listCases(requireRole(ctx, "MANAGER"), args ?? undefined);
-export const getEligibleVendors = async (args: { caseId: string }, ctx: Ctx) => read.eligibleVendors(requireRole(ctx, "MANAGER"), args?.caseId);
-export const reviewTriage = async (args: { caseId: string; category: Category; severity: Severity; note?: string }, ctx: Ctx) => write(flow.reviewTriage(requireRole(ctx, "MANAGER"), args));
-export const assignVendor = async (args: { caseId: string; vendorId: string; note?: string }, ctx: Ctx) => write(flow.assignVendor(requireRole(ctx, "MANAGER"), args));
-export const withdrawOffer = async (args: { caseId: string; reason?: string }, ctx: Ctx) => write(flow.withdrawOffer(requireRole(ctx, "MANAGER"), args));
-export const decideSpend = async (args: { caseId: string; approve: boolean; capCents?: number; note?: string }, ctx: Ctx) => write(flow.decideSpend(requireRole(ctx, "MANAGER"), args));
-export const escalateCase = async (args: { caseId: string; reason: string }, ctx: Ctx) => write(flow.escalateCase(requireRole(ctx, "MANAGER"), args));
-export const resumeCase = async (args: { caseId: string; note: string; severity?: Severity }, ctx: Ctx) => write(flow.resumeCase(requireRole(ctx, "MANAGER"), args));
-export const markHandledOutside = async (args: { caseId: string; note: string }, ctx: Ctx) => write(flow.markHandledOutside(requireRole(ctx, "MANAGER"), args));
-export const closeUnverified = async (args: { caseId: string; note?: string }, ctx: Ctx) => write(flow.closeUnverified(requireRole(ctx, "MANAGER"), args));
-export const decideSuggestion = async (args: { proposalId: string; accept: boolean; message?: string; note?: string }, ctx: Ctx) => decideProposalFn(requireRole(ctx, "MANAGER"), args);
-export const askRelayToReassess = async (args: { caseId: string }, ctx: Ctx) => requestReassessmentFn(requireRole(ctx, "MANAGER"), args);
-export const getSettings = async (_args: void, ctx: Ctx) => settings.getSettings(requireRole(ctx, "MANAGER"));
-export const updateProperty = async (args: settings.PropertyUpdate, ctx: Ctx) => settings.updateProperty(requireRole(ctx, "MANAGER"), args);
-export const addUnit = async (args: { propertyId: string; label: string }, ctx: Ctx) => settings.addUnit(requireRole(ctx, "MANAGER"), args);
-export const saveVendor = async (args: settings.VendorInput, ctx: Ctx) => settings.saveVendor(requireRole(ctx, "MANAGER"), args);
-export const setVendorApproved = async (args: { vendorId: string; approved: boolean }, ctx: Ctx) => settings.setVendorApproved(requireRole(ctx, "MANAGER"), args);
+const manager = (ctx: Ctx) => requireRole(ctx, "MANAGER");
+export const getCommandCenter = async (_args: void, ctx: Ctx) => read.commandCenter(manager(ctx));
+export const searchCases = async (args: CaseFilters | void, ctx: Ctx) => read.listCases(manager(ctx), args ?? undefined);
+export const getEligibleVendors = async (args: { caseId: string }, ctx: Ctx) => read.eligibleVendors(manager(ctx), args?.caseId);
+export const reviewTriage = async (args: { caseId: string; category: Category; severity: Severity; note?: string }, ctx: Ctx) => write(flow.reviewTriage(manager(ctx), args), manager(ctx).userId);
+export const assignVendor = async (args: { caseId: string; vendorId: string; note?: string }, ctx: Ctx) => write(flow.assignVendor(manager(ctx), args), manager(ctx).userId);
+export const withdrawOffer = async (args: { caseId: string; reason?: string }, ctx: Ctx) => write(flow.withdrawOffer(manager(ctx), args), manager(ctx).userId);
+export const decideSpend = async (args: { caseId: string; approve: boolean; capCents?: number; note?: string }, ctx: Ctx) => write(flow.decideSpend(manager(ctx), args), manager(ctx).userId);
+export const decideBudgetRequest = async (args: { caseId: string; approve: boolean; note?: string }, ctx: Ctx) => write(flow.decideBudgetRequest(manager(ctx), args), manager(ctx).userId);
+export const escalateCase = async (args: { caseId: string; reason: string }, ctx: Ctx) => write(flow.escalateCase(manager(ctx), args), manager(ctx).userId);
+export const resumeCase = async (args: { caseId: string; note: string; severity?: Severity }, ctx: Ctx) => write(flow.resumeCase(manager(ctx), args), manager(ctx).userId);
+export const markHandledOutside = async (args: { caseId: string; note: string }, ctx: Ctx) => write(flow.markHandledOutside(manager(ctx), args), manager(ctx).userId);
+export const closeUnverified = async (args: { caseId: string; note?: string }, ctx: Ctx) => write(flow.closeUnverified(manager(ctx), args), manager(ctx).userId);
+export const decideSuggestion = async (args: { proposalId: string; accept: boolean; message?: string; note?: string }, ctx: Ctx) => decideProposalFn(manager(ctx), args);
+export const askRelayToReassess = async (args: { caseId: string }, ctx: Ctx) => requestReassessmentFn(manager(ctx), args);
+export const getSettings = async (_args: void, ctx: Ctx) => settings.getSettings(manager(ctx));
+export const updateProperty = async (args: settings.PropertyUpdate, ctx: Ctx) => settings.updateProperty(manager(ctx), args);
+export const addUnit = async (args: { propertyId: string; label: string }, ctx: Ctx) => settings.addUnit(manager(ctx), args);
+export const saveVendor = async (args: settings.VendorInput, ctx: Ctx) => resumeAll(settings.saveVendor(manager(ctx), args));
+export const setVendorApproved = async (args: { vendorId: string; approved: boolean; propertyId?: string }, ctx: Ctx) => resumeAll(settings.setVendorApproved(manager(ctx), args));
+
+// Vendor discovery (Fiber AI). Discovery never authorizes anything: only onboarding a verified business does.
+export const getDiscoveryPanel = async (args: { caseId: string }, ctx: Ctx) => discovery.discoveryPanel(manager(ctx), args?.caseId);
+export const getFiberStatus = async (_args: void, ctx: Ctx) => discovery.fiberStatus(manager(ctx));
+export const requestVendorDiscovery = async (args: { caseId: string; force?: boolean }, ctx: Ctx) => {
+  const r = await discovery.requestDiscovery(manager(ctx), args);
+  kickEmail();
+  return r;
+};
+export const reviewCandidate = async (args: { candidateId: string; decision: "SHORTLIST" | "VERIFY" | "REJECT" | "REOPEN"; note?: string }, ctx: Ctx) => discovery.reviewCandidate(manager(ctx), args);
+export const onboardCandidate = async (args: { candidateId: string; phone?: string; email?: string; note?: string }, ctx: Ctx) => {
+  const r = await discovery.onboardCandidate(manager(ctx), args);
+  for (const id of r.resumedCaseIds ?? []) void kickCoordinator(id);
+  kickEmail();
+  return { ok: r.ok, repeated: r.repeated, vendorId: r.vendorId, resumed: r.resumed };
+};
 
 // ───────────────────────── contractor ─────────────────────────
 
-export const getMyJobs = async (_args: void, ctx: Ctx) => read.jobBoard(requireRole(ctx, "CONTRACTOR"));
-export const respondToOffer = async (args: flow.OfferResponse, ctx: Ctx) => write(flow.respondToOffer(requireRole(ctx, "CONTRACTOR"), args));
-export const proposeVisitTimes = async (args: { caseId: string; slots: flow.SlotInput[] }, ctx: Ctx) => write(flow.proposeSlots(requireRole(ctx, "CONTRACTOR"), args));
-export const startWork = async (args: { caseId: string }, ctx: Ctx) => write(flow.startWork(requireRole(ctx, "CONTRACTOR"), args));
-export const addProgressNote = async (args: { caseId: string; note: string }, ctx: Ctx) => write(flow.addProgressNote(requireRole(ctx, "CONTRACTOR"), args));
-export const completeWork = async (args: { caseId: string; notes: string; finalCostCents?: number | null }, ctx: Ctx) => write(flow.completeWork(requireRole(ctx, "CONTRACTOR"), args));
+const contractor = (ctx: Ctx) => requireRole(ctx, "CONTRACTOR");
+export const getMyJobs = async (_args: void, ctx: Ctx) => read.jobBoard(contractor(ctx));
+export const respondToOffer = async (args: flow.OfferResponse, ctx: Ctx) => write(flow.respondToOffer(contractor(ctx), args), contractor(ctx).userId);
+export const proposeVisitTimes = async (args: { caseId: string; slots: flow.SlotInput[] }, ctx: Ctx) => write(flow.proposeSlots(contractor(ctx), args), contractor(ctx).userId);
+export const startWork = async (args: { caseId: string }, ctx: Ctx) => write(flow.startWork(contractor(ctx), args), contractor(ctx).userId);
+export const addProgressNote = async (args: { caseId: string; note: string }, ctx: Ctx) => write(flow.addProgressNote(contractor(ctx), args), contractor(ctx).userId);
+export const completeWork = async (args: { caseId: string; notes: string; finalCostCents?: number | null }, ctx: Ctx) => write(flow.completeWork(contractor(ctx), args), contractor(ctx).userId);
+export const requestMoreBudget = async (args: { caseId: string; additionalCents: number; reason: string }, ctx: Ctx) => write(flow.requestMoreBudget(contractor(ctx), args), contractor(ctx).userId);

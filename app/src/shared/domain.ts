@@ -3,8 +3,14 @@
 export const ROLES = ["RESIDENT", "MANAGER", "CONTRACTOR"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const CATEGORIES = ["PLUMBING", "APPLIANCE", "HVAC", "OTHER"] as const;
+export const CATEGORIES = ["PLUMBING", "APPLIANCE", "HVAC", "ELECTRICAL", "ACCESS", "ELEVATOR", "NOISE", "OTHER"] as const;
 export type Category = (typeof CATEGORIES)[number];
+/** Categories that are a trade a vendor can be hired for. NOISE is handled by management; OTHER is routed by a person. */
+export const VENDOR_TRADES = ["PLUMBING", "APPLIANCE", "HVAC", "ELECTRICAL", "ACCESS", "ELEVATOR"] as const;
+export type Trade = (typeof VENDOR_TRADES)[number];
+export const isTrade = (c: string): c is Trade => (VENDOR_TRADES as readonly string[]).includes(c);
+/** Handled by the property manager directly, never offered to a vendor. */
+export const managerHandled = (c: Category) => c === "NOISE";
 
 export const SEVERITIES = ["EMERGENCY", "URGENT", "ROUTINE"] as const;
 export type Severity = (typeof SEVERITIES)[number];
@@ -43,9 +49,31 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   PLUMBING: "Plumbing and water",
   APPLIANCE: "Appliances and laundry",
   HVAC: "Heating and cooling",
+  ELECTRICAL: "Electrical and lighting",
+  ACCESS: "Locks, keys and doors",
+  ELEVATOR: "Elevator",
+  NOISE: "Noise or a neighbour",
   OTHER: "Something else",
 };
-export const CATEGORY_SHORT: Record<Category, string> = { PLUMBING: "Plumbing", APPLIANCE: "Appliance", HVAC: "Heating and cooling", OTHER: "Other" };
+export const CATEGORY_SHORT: Record<Category, string> = {
+  PLUMBING: "Plumbing",
+  APPLIANCE: "Appliance",
+  HVAC: "Heating and cooling",
+  ELECTRICAL: "Electrical",
+  ACCESS: "Locks and access",
+  ELEVATOR: "Elevator",
+  NOISE: "Noise",
+  OTHER: "General",
+};
+/** What the trade is called when looking for a business that does it. */
+export const TRADE_NOUN: Record<Trade, string> = {
+  PLUMBING: "plumber",
+  APPLIANCE: "appliance repair company",
+  HVAC: "heating and cooling contractor",
+  ELECTRICAL: "electrician",
+  ACCESS: "locksmith",
+  ELEVATOR: "elevator service company",
+};
 export const SEVERITY_LABEL: Record<Severity, string> = { EMERGENCY: "Emergency", URGENT: "Urgent", ROUTINE: "Routine" };
 export const STATUS_LABEL: Record<CaseStatus, string> = {
   NEW: "New",

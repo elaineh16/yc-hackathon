@@ -134,8 +134,107 @@ export const QUESTIONS: Record<Category, readonly Question[]> = {
       required: true,
     },
   ],
+  ELECTRICAL: [
+    {
+      key: "what",
+      label: "What is affected?",
+      ask: "What is affected: outlets, lights, a switch, the breaker panel, or the power in the whole unit?",
+      kind: "choice",
+      required: true,
+      options: opt([
+        ["outlets", "Outlets"],
+        ["lights", "Lights"],
+        ["switch", "A switch"],
+        ["breaker_panel", "Breaker or panel"],
+        ["whole_unit", "No power in the whole unit"],
+        ["other", "Something else"],
+      ]),
+    },
+    {
+      key: "burningOrSparks",
+      label: "Is there a burning smell, smoke, sparking or a hot outlet?",
+      ask: "Is there any burning smell, smoke, sparking, or an outlet or switch that feels hot?",
+      kind: "yesno",
+      required: true,
+      safety: true,
+    },
+    { key: "waterNearby", label: "Is there water near it?", ask: "Is there any water near it?", kind: "yesno", required: true, safety: true },
+    { key: "breakerTried", label: "Have you tried resetting the breaker?", ask: "Have you tried resetting the breaker?", kind: "yesno", required: false },
+  ],
+  ACCESS: [
+    {
+      key: "issue",
+      label: "What is the problem?",
+      ask: "Are you locked out, or is it a broken lock, a key or fob that does not work, or an entry or garage door?",
+      kind: "choice",
+      required: true,
+      options: opt([
+        ["locked_out", "Locked out"],
+        ["lock_broken", "Lock broken or stuck"],
+        ["key_fob", "Key or fob not working"],
+        ["entry_door", "Building entry door"],
+        ["garage_door", "Garage door"],
+        ["other", "Something else"],
+      ]),
+    },
+    {
+      key: "someoneAtRisk",
+      label: "Is anyone inside who needs help, or is anything left on (stove, bath, iron)?",
+      ask: "Is anyone inside who needs help, such as a child or someone unwell, or is anything left on, like the stove or a bath?",
+      kind: "yesno",
+      required: true,
+      safety: true,
+      hint: "Staff verify who you are before anyone is let in. Relay never shares door or lockbox codes.",
+    },
+  ],
+  ELEVATOR: [
+    {
+      key: "someoneTrapped",
+      label: "Is anyone trapped in the elevator right now?",
+      ask: "Is anyone trapped in the elevator right now?",
+      kind: "yesno",
+      required: true,
+      safety: true,
+    },
+    {
+      key: "problem",
+      label: "What is it doing?",
+      ask: "What is it doing: stopping between floors, doors not opening or closing, not running at all, or making noise?",
+      kind: "choice",
+      required: true,
+      options: opt([
+        ["stuck_between_floors", "Stops between floors"],
+        ["doors", "Doors not opening or closing"],
+        ["not_running", "Not running"],
+        ["noise", "Unusual noise or shaking"],
+        ["other", "Something else"],
+      ]),
+    },
+  ],
+  NOISE: [
+    { key: "ongoing", label: "Is it happening right now?", ask: "Is it happening right now?", kind: "yesno", required: true },
+    {
+      key: "someoneInDanger",
+      label: "Does anyone sound hurt or in danger?",
+      ask: "Does anyone sound hurt or in danger, for example a fight or someone calling for help?",
+      kind: "yesno",
+      required: true,
+      safety: true,
+      hint: "If someone may be in danger, call 911 first.",
+    },
+    { key: "when", label: "When does it usually happen?", ask: "When does it usually happen?", kind: "text", required: false, hint: "For example: most nights after 11 pm" },
+  ],
   // Anything else is saved in the resident's own words and goes to a person.
-  OTHER: [],
+  OTHER: [
+    {
+      key: "danger",
+      label: "Is anything dangerous right now (gas smell, smoke, sparks, flooding)?",
+      ask: "Is anything dangerous right now, like a gas smell, smoke, sparks or flooding?",
+      kind: "yesno",
+      required: false,
+      safety: true,
+    },
+  ],
 };
 
 const YES = /^(true|yes|y)$/i;

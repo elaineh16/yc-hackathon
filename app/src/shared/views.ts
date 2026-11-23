@@ -17,6 +17,11 @@ export type Me = {
   properties: { id: string; name: string }[];
   /** Voice intake is offered only when the server has ElevenLabs configured. */
   voiceAvailable: boolean;
+  /** Email is optional and opt-in. */
+  email: string | null;
+  emailNotifications: boolean;
+  /** Whether the server can send email at all (SMTP configured), and whether it is a capture server. */
+  emailChannel: { configured: boolean; capture: boolean };
 };
 
 export type AiStatus = { available: boolean; model: string; reason: string };
@@ -92,6 +97,8 @@ export type AssignmentView = {
   completionNotes: string | null;
   approval: ApprovalView | null;
   slots: SlotView[];
+  /** The contractor asked for more money mid-job. Managers and the contractor see it; residents do not. */
+  changeRequest: { cents: number; reason: string; status: "PENDING" | "APPROVED" | "REJECTED"; requestedAt: string | null; decidedAt: string | null } | null;
 };
 
 /** What the current viewer may do right now. The server re-checks every action; this only drives which controls show. */
@@ -114,6 +121,14 @@ export type CaseAbilities = {
   reopen: boolean;
   cancel: boolean;
   cancelAppointment: boolean;
+  /** Contractor: ask for more than the approved amount. */
+  requestMoreBudget: boolean;
+  /** Manager: decide a contractor's request for more money. */
+  decideBudgetRequest: boolean;
+  /** Manager: record that it was handled without a vendor (noise, a lockout let in by staff). */
+  handleDirectly: boolean;
+  /** Manager: look for local businesses when the directory has no vendor for the trade. */
+  searchVendors: boolean;
 };
 
 export type AiProposalView = {
@@ -155,6 +170,27 @@ export type CaseAi = {
   runs: AgentRunView[];
 };
 
+/** One notification to one person on one channel, with what really happened to it. Managers only. */
+export type FollowUpView = {
+  id: string;
+  at: string;
+  recipient: string;
+  role: Role;
+  eventType: string;
+  channel: "IN_APP" | "EMAIL";
+  /** DELIVERED (in the Relay inbox), ACCEPTED (by the mail server, inbox delivery not confirmed), CAPTURED (by a test
+   *  mail server, not delivered), PENDING, SENDING, FAILED or SKIPPED (with the reason in statusNote). */
+  status: "PENDING" | "SENDING" | "DELIVERED" | "ACCEPTED" | "CAPTURED" | "FAILED" | "SKIPPED";
+  statusNote: string | null;
+  title: string;
+  sentAt: string | null;
+  readAt: string | null;
+  acknowledgedAt: string | null;
+  ackDueAt: string | null;
+  attempts: number;
+  lastError: string | null;
+};
+
 export type CaseDetail = CaseListItem & {
   viewerRole: Role;
   channel: IntakeChannel;
@@ -184,6 +220,14 @@ export type CaseDetail = CaseListItem & {
   policy: { approvalThresholdCents: number };
   can: CaseAbilities;
   ai: CaseAi | null;
+  /** Intake's reading, kept apart: what the resident said, what Relay inferred, what is still unknown. */
+  observations: string[];
+  assumptions: string[];
+  openQuestions: string[];
+  /** Other cases filed from the same multi-issue report. */
+  related: { id: string; ref: string; title: string; status: CaseStatus }[];
+  /** Every notification on this case and what happened to it. Managers only. */
+  followUps: FollowUpView[] | null;
 };
 
 export type VendorOption = {
@@ -201,8 +245,42 @@ export type VendorOption = {
 
 export type ActivityItem = EventView & { caseId: string; caseRef: string; caseTitle: string };
 
+export type QueueItem = CaseListItem & { why: string };
 export type CommandCenter = {
-  counts: { open: number; emergencies: number; waitingOnManager: number; waitingOnContractors: number; waitingOnResidents: number; overdue: number; resolvedThisWeek: number; suggestions: number };
+  counts: {
+    open: number;
+    emergencies: number;
+    waitingOnManager: number;
+    waitingOnContractors: number;
+    waitingOnResidents: number;
+    overdue: number;
+    resolvedThisWeek: number;
+    suggestions: number;
+    discovery: number;
+    overdueAcks: number;
+  };
+  /** Measured from the database, not estimated. */
+  metrics: {
+    resolvedLast30: number;
+    medianHoursToResolve: number | null;
+    aiProposalsLast30: number;
+    aiAcceptedLast30: number;
+    aiRejectedLast30: number;
+    coordinatorRunsLast24h: number;
+    coordinatorFailedLast24h: number;
+    emailsLast24h: { captured: number; accepted: number; skipped: number; failed: number; pending: number };
+  };
+  /** Cases a person has to move now, most urgent first, with the reason. */
+  humanQueue: QueueItem[];
+  /** Vendor discovery waiting for a manager: searches to approve, failures, businesses to review. */
+  discovery: {
+    searches: { id: string; status: string; caseId: string | null; caseRef: string | null; caseTitle: string | null; trade: Category; query: string; error: string | null; at: string }[];
+    toReview: { trade: Category; status: string; count: number }[];
+  };
+  /** Notifications that needed someone to act or acknowledge by a deadline that has passed. */
+  overdueAcks: { id: string; caseId: string | null; caseRef: string | null; recipient: string; role: Role; title: string; dueAt: string }[];
+  /** What Relay's coordinator did recently, as recorded. */
+  aiRuns: { id: string; caseId: string; caseRef: string; trigger: string; status: string; durationMs: number | null; at: string; summary: string }[];
   /** Emergencies, escalations and overdue actions, most pressing first. */
   attention: CaseListItem[];
   waitingOnManager: CaseListItem[];
@@ -239,10 +317,40 @@ export type JobItem = CaseListItem & {
 };
 export type JobBoard = { offers: JobItem[]; active: JobItem[]; done: JobItem[] };
 
-export type NotificationView = { id: string; at: string; kind: string; title: string; body: string; caseId: string | null; read: boolean };
+export type NotificationView = {
+  id: string;
+  at: string;
+  kind: string;
+  eventType: string;
+  title: string;
+  body: string;
+  caseId: string | null;
+  read: boolean;
+  /** The recipient was asked to act or acknowledge by ackDueAt. Acting on the case acknowledges it. */
+  ackRequired: boolean;
+  ackDueAt: string | null;
+  acknowledged: boolean;
+  overdue: boolean;
+};
 export type Inbox = { items: NotificationView[]; unread: number };
 
-export type VendorSettings = { id: string; name: string; trades: Category[]; phone: string | null; email: string | null; approved: boolean; notes: string | null; logins: string[]; openJobs: number };
+export type VendorSettings = {
+  id: string;
+  name: string;
+  trades: Category[];
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  notes: string | null;
+  /** MANUAL or DISCOVERY. */
+  source: string;
+  logins: string[];
+  openJobs: number;
+  /** Where this vendor is approved, among the properties this manager runs. */
+  approvedAt: { propertyId: string; propertyName: string; approved: boolean; source: string }[];
+  /** Also listed at a property this manager does not run: its details are shared, so they cannot edit them. */
+  sharedElsewhere: boolean;
+};
 export type PropertySettings = {
   id: string;
   name: string;
@@ -252,13 +360,26 @@ export type PropertySettings = {
   knowledge: string;
   /** Relay AI may send routine offers without waiting for a manager. */
   autopilotRoutine: boolean;
+  /** Search for local businesses automatically when no approved vendor covers a trade (false: ask a manager first). */
+  autoDiscovery: boolean;
+  city: string;
+  region: string;
+  serviceRadiusKm: number;
+  residentResponseMinutes: number;
+  maxReminders: number;
+  appointmentReminderMinutes: number;
   approvalThresholdCents: number;
   vendorResponseMinutes: number;
   verificationReminderMinutes: number;
   verificationCloseAfterMinutes: number;
   units: { id: string; label: string; residents: string[] }[];
 };
-export type Settings = { properties: PropertySettings[]; vendors: VendorSettings[] };
+export type Settings = {
+  properties: PropertySettings[];
+  vendors: VendorSettings[];
+  me: { email: string | null; emailNotifications: boolean };
+  email: { configured: boolean; capture: boolean };
+};
 
 export type VoiceCredential = {
   connectionType: "webrtc" | "websocket";
@@ -266,4 +387,98 @@ export type VoiceCredential = {
   signedUrl: string | null;
   /** Passed to the voice agent so it can greet the resident and knows the unit. */
   dynamicVariables: { resident_name: string; property_name: string; unit_label: string };
+};
+
+// ───────────────────────── vendor discovery (managers only) ─────────────────────────
+
+export type CandidateStatus = "NEW" | "SHORTLISTED" | "VERIFIED" | "APPROVED" | "REJECTED";
+export type CandidateView = {
+  id: string;
+  name: string;
+  trade: Category;
+  status: CandidateStatus;
+  /** fiber:google-maps for live results, fixture:google-maps for test fixtures. */
+  source: string;
+  sourceUrl: string | null;
+  phone: string | null;
+  website: string | null;
+  address: string | null;
+  categories: string[];
+  rating: number | null;
+  reviewCount: number | null;
+  distanceKm: number | null;
+  /** Deterministic checks on the source data. */
+  checks: { categoryMatch: "strong" | "weak" | "none"; inServiceArea: boolean | null; hasContact: boolean; duplicate: boolean };
+  /** The existing vendor this business already is, if any. */
+  duplicateOf: string | null;
+  /** What nobody has confirmed yet (licence, insurance, availability, pricing...). */
+  missing: string[];
+  recommendation: "RECOMMENDED" | "POSSIBLE" | "NOT_RECOMMENDED";
+  /** Built only from the source fields above. */
+  reasons: string[];
+  concerns: string[];
+  /** RULES, or the model that wrote aiNote (kept only after a grounding check). */
+  assessedBy: string;
+  aiNote: string | null;
+  reviewNote: string | null;
+  verificationNote: string | null;
+  verifiedAt: string | null;
+  timesSeen: number;
+  /** Older than the cache window: details may be out of date. */
+  stale: boolean;
+  foundAt: string;
+  vendorId: string | null;
+};
+export type DiscoveryStatus = "AWAITING_MANAGER" | "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELLED";
+export type DiscoveryView = {
+  id: string;
+  createdAt: string;
+  finishedAt: string | null;
+  status: DiscoveryStatus;
+  trade: Category;
+  /** Exactly what was sent to the provider. */
+  query: string;
+  location: string;
+  provider: string;
+  /** live | sandbox | fixture | off */
+  mode: string;
+  requestedBy: string;
+  attempts: number;
+  placesReturned: number | null;
+  candidatesKept: number | null;
+  creditsCharged: number | null;
+  creditsBefore: number | null;
+  /** The provider's chargeInfo and warnings, verbatim (JSON text). */
+  chargeInfo: string | null;
+  warnings: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  /** A cache hit: no new call was made. */
+  reused: boolean;
+  filtered: { name: string; reason: string }[];
+};
+export type DiscoveryPanel = {
+  trade: Category;
+  /** Only trades a vendor can be hired for have discovery. */
+  applies: boolean;
+  approvedVendors: number;
+  usableVendors: number;
+  provider: { mode: string; configured: boolean; maxCandidates: number; creditsPerSearch: number };
+  discoveries: DiscoveryView[];
+  candidates: CandidateView[];
+  canSearch: boolean;
+};
+export type FiberStatus = {
+  mode: string;
+  configured: boolean;
+  balance: { available: number; max: number; used: number; resetsOn: string | null } | null;
+  balanceError: string | null;
+  creditsPerSearch: number;
+  dailyCreditBudget: number;
+  minBalance: number;
+  maxCandidates: number;
+  cacheDays: number;
+  spentToday: number;
+  searchesToday: number;
+  recent: (DiscoveryView & { caseRef: string | null })[];
 };

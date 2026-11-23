@@ -5,23 +5,15 @@
 // An agent's reading passes through policy: the rules can only raise severity, and any safety concern escalates.
 // The function returns only after the transaction commits, so nobody is told "saved" early.
 import { HttpError, prisma } from "wasp/server";
-import { caseRef, type Category, CATEGORIES, type CaseStatus, type IntakeChannel, type Severity, SEVERITIES } from "../../shared/domain";
+import { caseRef, type Category, CATEGORIES, CATEGORY_SHORT, type CaseStatus, type IntakeChannel, type Severity, SEVERITIES } from "../../shared/domain";
 import { validateDetails } from "../../shared/intake";
 import { triage } from "../../shared/triage";
-import { cleanFacts } from "../agent/loop";
 import { traced } from "../tracing";
+import { type AgentReading, type Classification, classifyAgent, clean } from "./classify";
+
+export type { AgentReading };
 import { type ActorCtx, addEvent, CASE_INCLUDE, faults, flagForCoordinator, isUuid, managerIds, move, notify, SYSTEM } from "./engine";
 
-export type AgentReading = {
-  category: Category;
-  severity: Severity;
-  title: string;
-  summary: string;
-  rationale: string;
-  needsReview: boolean;
-  safetyConcerns: string[];
-  facts: Record<string, unknown>;
-};
 export type IntakeInput = {
   unitId: string;
   description: string;
@@ -34,6 +26,8 @@ export type IntakeInput = {
   title?: string | null;
   permissionToEnter?: boolean;
   accessNotes?: string | null;
+  /** Cases filed from one multi-issue report share this id. */
+  intakeGroup?: string | null;
 };
 export type IntakeResult = {
   caseId: string;
@@ -52,10 +46,6 @@ export type IntakeResult = {
   message: string;
 };
 
-const clean = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
-const RANK: Record<Severity, number> = { EMERGENCY: 0, URGENT: 1, ROUTINE: 2 };
-const NOTHING = /^(none|no|n\/a|nothing|no concerns?|not applicable)\.?$/i;
-
 function resultMessage(r: Pick<IntakeResult, "ref" | "emergency" | "needsReview" | "safetyAdvice" | "managersNotified">): string {
   const told = r.managersNotified > 0 ? "The property manager has been alerted in Relay." : "No manager is set up for this property in Relay yet, so contact the property office directly.";
   if (r.emergency) return `Your report is saved as ${r.ref}. ${r.safetyAdvice ?? "If anyone is in danger, call 911."} ${told} It is being handled as an emergency, not as a routine repair.`;
@@ -63,46 +53,18 @@ function resultMessage(r: Pick<IntakeResult, "ref" | "emergency" | "needsReview"
   return `Your report is saved as ${r.ref}. ${r.managersNotified > 0 ? "The property manager has been notified and Relay is lining up a vendor." : told} You can follow progress on this page.`;
 }
 
-type Classification = { category: Category; severity: Severity; emergency: boolean; needsReview: boolean; reasons: string[]; safetyAdvice: string | null; title: string; summary: string; details: Record<string, unknown>; source: string };
-
 /** The form path: the category's questions, validated, triaged by rules. */
 function classifyForm(description: string, raw: IntakeInput): Classification {
   const hint = raw.categoryHint && (CATEGORIES as readonly string[]).includes(raw.categoryHint) ? raw.categoryHint : null;
   const first = triage({ description, categoryHint: hint });
-  const checked = validateDetails(first.category, raw.details);
+  // Validate the answers to the questions the resident was actually shown: those of the category they chose.
+  const asked = hint ?? first.category;
+  const checked = validateDetails(asked, raw.details);
   if (!checked.ok) {
-    throw new HttpError(400, `Some answers are missing or not understood: ${[...checked.missing, ...checked.invalid].join(", ")}.`, { code: "invalid_details", category: first.category, missing: checked.missing, invalid: checked.invalid });
+    throw new HttpError(400, `Some answers are missing or not understood: ${[...checked.missing, ...checked.invalid].join(", ")}.`, { code: "invalid_details", category: asked, missing: checked.missing, invalid: checked.invalid });
   }
   const t = triage({ description, categoryHint: hint, details: checked.details, title: clean(raw.title, 80) || null });
-  return { ...t, details: checked.details, source: "RULES" };
-}
-
-/** The agent path: the agent's reading, checked and tightened by deterministic policy. */
-function classifyAgent(description: string, a: AgentReading, channel: IntakeChannel): Classification {
-  const category = (CATEGORIES as readonly string[]).includes(a?.category) ? a.category : "OTHER";
-  const agentSeverity = (SEVERITIES as readonly string[]).includes(a?.severity) ? a.severity : "URGENT";
-  const concerns = (Array.isArray(a?.safetyConcerns) ? a.safetyConcerns : []).map((s) => clean(s, 160)).filter((s) => s && !NOTHING.test(s)).slice(0, 5);
-  // The rules read the resident's own words plus anything the agent flagged.
-  const rules = triage({ description: [description, ...concerns].join(". "), categoryHint: category === "OTHER" ? null : category });
-  const emergency = rules.emergency || agentSeverity === "EMERGENCY" || concerns.length > 0;
-  let severity: Severity = RANK[rules.severity] < RANK[agentSeverity] ? rules.severity : agentSeverity;
-  if (emergency) severity = "EMERGENCY";
-  const reasons = [`Relay's ${channel === "VOICE" ? "voice" : "intake"} assistant: ${clean(a?.rationale, 300) || "no reason given"}`];
-  for (const r of rules.reasons) if (!/^(Reported as|Classified as)/.test(r)) reasons.push(`Safety rule: ${r}`);
-  for (const c of concerns) reasons.push(`Safety concern noted: ${c}`);
-  if (RANK[severity] < RANK[agentSeverity]) reasons.push(`Policy raised the severity from ${agentSeverity.toLowerCase()} to ${severity.toLowerCase()}.`);
-  return {
-    category,
-    severity,
-    emergency,
-    needsReview: a?.needsReview === true || category === "OTHER",
-    reasons,
-    safetyAdvice: emergency ? (rules.safetyAdvice ?? "Keep away from the hazard. If anyone is in danger, call 911.") : null,
-    title: clean(a?.title, 80) || rules.title,
-    summary: clean(a?.summary, 500) || rules.summary,
-    details: cleanFacts(a?.facts),
-    source: channel === "VOICE" ? "VOICE_AGENT" : "AGENT",
-  };
+  return { ...t, details: checked.details, source: "RULES", observations: [], assumptions: [], openQuestions: [] };
 }
 
 export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<IntakeResult> {
@@ -149,6 +111,10 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
             details: t.details as object,
             permissionToEnter: raw.permissionToEnter === true,
             accessNotes: clean(raw.accessNotes, 300) || null,
+            observations: t.observations,
+            assumptions: t.assumptions,
+            openQuestions: t.openQuestions,
+            intakeGroup: clean(raw.intakeGroup, 80) || null,
             status: "NEW",
             holder: "SYSTEM",
             nextAction: "Triage the report",
@@ -165,7 +131,7 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
         faults.hit("intake.afterCreate");
 
         await move(tx, created, "TRIAGE", SYSTEM, {
-          message: `Triaged as ${t.category.toLowerCase()}, ${t.severity.toLowerCase()}. ${t.reasons.join(" ")}`,
+          message: `Triaged as ${CATEGORY_SHORT[t.category].toLowerCase()}, ${t.severity.toLowerCase()}. ${t.reasons.join(" ")}`,
           data: { category: t.category, severity: t.severity, source: t.source },
         });
         const managers = await managerIds(tx, created.propertyId);
@@ -185,6 +151,17 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
           type: "MANAGERS_NOTIFIED",
           audience: "MANAGEMENT",
           message: managersNotified > 0 ? `${managersNotified} manager${managersNotified === 1 ? "" : "s"} notified in Relay.` : "No manager is assigned to this property, so nobody was notified.",
+        });
+        // Follow-up A: the resident gets a record that the report was received, and what happens next.
+        await notify(tx, [residentId], created.id, "received", {
+          kind: "UPDATE",
+          email: true,
+          title: `Report received: ${ref}`,
+          body: t.emergency
+            ? `${t.safetyAdvice ?? "If anyone is in danger, call 911."} Your report "${t.title}" is being handled as an emergency by your property manager.`
+            : t.needsReview
+              ? `We received "${t.title}". A person will review it and decide who should handle it. You can follow it in Relay.`
+              : `We received "${t.title}". Your property manager has it and Relay is lining up the next step. You can follow it in Relay.`,
         });
         return toResult({ ...created }, false, t.safetyAdvice, managersNotified);
       });
