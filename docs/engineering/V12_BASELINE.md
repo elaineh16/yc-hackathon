@@ -12,16 +12,20 @@ fix first. Written so that someone who did not build Relay can check every claim
 
 ## Method
 
-1. **Two independent audits.** One read-only audit covered the AI evaluation evidence and one covered backend
-   reliability. Each was told what to read, not what to find.
+1. **Two separate audits.** One read-only audit covered the AI evaluation evidence and one covered backend
+   reliability. Each was given the areas to cover and the files to read. The backend brief also carried one
+   unrecorded figure, the 160–254 s job delays (§2).
 2. **Spot checks against the code.** I checked their findings against the code. Every line reference below was read
    at `59a52bd`.
-3. **Independent recount.** Every live-evaluation number was recounted from the committed evidence files by a
-   separate script.
-   - All counts match the audit's.
+3. **Independent recount.** A separate script recounted the headline live numbers from the committed evidence
+   files: escalation, route, category, tool calls, the turn each case was filed on, and latency.
+   - Those counts match the audit's.
    - Percentiles here use linear interpolation, so two p90 latencies differ slightly from the audit's.
+   - Two counts are the audit's alone: the refused tool calls, and the held-out cases that waited for "Please file it
+     now."
 4. **No re-scoring.** Nothing in `docs/evidence/` from before this work was re-scored or edited. One measurement
-   written during this work was wrong and was corrected before publication (§3, the safety screen).
+   written during this work, the safety screen, was wrong and was corrected before publication
+   ([01-intake-safety-net.md](01-intake-safety-net.md#problems-found-while-doing-this), item 6).
 5. **Statistics.**
    - Rates carry 95% Wilson score intervals.
    - Version-to-version comparisons use a two-sided Fisher exact test.
@@ -32,12 +36,12 @@ fix first. Written so that someone who did not build Relay can check every claim
 | Claim | Evidence |
 | --- | --- |
 | Type-check clean; unit tests 35/35; API tests 86/86 (six suites); browser journeys 16/16 | [STATUS.md](../../STATUS.md), logs in `docs/evidence/` (2026-11-23); CI green on `59a52bd` |
-| The deterministic safety gate passes: no missed emergency or false escalation by the rules on the 99 tuned cases or on held-out v1's emergencies | `tests/eval/deterministic.ts --gate`, in CI |
+| The deterministic safety gate passes. It requires that the rules miss no expected emergency on the 99 tuned cases or held-out v1, and raise at most 2 false alarms there; there are currently 0 (0/76 and 0/17) | `tests/eval/deterministic.ts --gate`, in CI; [ai-eval.md](../ai-eval.md) |
 | Policy guarantees, given synthetic model outputs: the rules overrule a model that calls a hazard routine (23/23); no coordinator escalation on a trap executes (0/13); no ungrounded resident draft is accepted (56/56 rejected); codes in replies are redacted (3/3); no agent tool can approve spending | [ai-eval.md](../ai-eval.md), `eval-deterministic.json` |
 | Concurrency already serialized: every action locks the case row; `confirmSlot` locks the vendor row; a partial unique index allows one confirmed slot per assignment; offer responses are idempotent | `cases/engine.ts:35,160`, `cases/flow.ts:539-543`, migration `20261123021800_one_live_offer_guard`; `reliability.test.ts` |
 | Fiber AI: one live search through the manager interface charged exactly 2 credits (2,500 → 2,498); a run interrupted after the paid call resumes without paying again | [fiber.md](../fiber.md), `fiber-live-ui-search.json`; `discovery.test.ts` |
 | Email: captured by Mailpit; concurrent delivery passes send each email once; an SMTP outage retries, then fails clearly | `followups.test.ts` |
-| Agents on the real model: the intake agent converses and files through the server; the coordinator reviews and every proposal passes policy | `agent-tests-run.txt` (`qwen2.5:3b`, 2/2) |
+| Agents on the real model (V1.1, 2026-11-23): the intake agent converses and files through the server; the coordinator reviews and every proposal passes policy | `agent-tests-run.txt` (`qwen2.5:3b`, 2/2); not re-verified since (§2) |
 | After the first improvement: unit 40/40, API 97/97 (seven suites), browser journeys 18/18 | [01-intake-safety-net.md](01-intake-safety-net.md#tests) |
 
 ## 2. What is unverified, or too weakly measured to rely on
@@ -70,7 +74,7 @@ fix first. Written so that someone who did not build Relay can check every claim
   - The tools and database are mocks (`tests/eval/live.ts:3-5`).
   - The resident is a four-turn script that ignores what it is asked (`live.ts:145-146`).
   - The production turn deadline is not applied (`live.ts:154`; production `agent/intake.ts:320`). Two V1.1 turns
-    ran past 180 s, and nine timed-out cases were replaced by reruns.
+    ran past 180 s (both spanned a laptop sleep), and nine timed-out cases were replaced by reruns.
   - Tool arguments and tool errors are not stored (`live.ts:156`).
   - It calls the agent directly, so it cannot see anything `sendIntakeMessage` does, including the new safety net.
 - **The coordinator harness is not production either.**
@@ -128,7 +132,7 @@ V1.1.
 | **Invented facts** | 5/34 → 1/34 (I001 `smell_intensity=strong`) | Intake facts have no grounding check (`classify.ts:73-75`), unlike the coordinator's drafts **[safeguard]** | Open |
 | **Unnecessary clarification of emergencies** | Emergencies filed on the first turn: 1/10 → 3/10; ho2 0/13. In ho2, 10 of 13 waited for the scripted "Please file it now." Refused tool calls: 5 in 2 cases (V1), 16 in 13 cases (V1.1). I083 (flames) was told "It seems I need to provide more specific facts" | The model reads back before filing, and tool errors go back to the model (`loop.ts:63,73-74`) **[model] [schema]**. Not the submit gate: `validateSubmit` already exempts anything marked EMERGENCY or with a safety concern (`intakePolicy.ts:90`) | Partly: emergencies the rules recognise no longer wait for the model (01) |
 | **Safety advice** | Reached the resident: 5/10 → 8/10. From the model's own replies: 0/10, 0/10, ho2 0/13 | All of it comes from the server's confirmation text. The advice is the rules' text for the category, so water through a sparking ceiling light gets "Do not use the appliance or the outlet" **[safeguard]** | Open (wording) |
-| **Latency** | Turn median / p90: 15.5 s / 28.4 s (121 turns) → 31.2 s / 117.0 s (113 turns); ho2 25.2 s / 52.6 s. One V1.1 turn spans a laptop sleep (6,755 s) | A 3B model on CPU, up to 6 model calls per turn (`intake.ts:319`). The explanation in ai-eval.md ("its prompt and tool schemas are longer") is untested and confounded with CPU contention **[infra]** | Open |
+| **Latency** | Turn median / p90: 15.5 s / 28.4 s (121 turns) → 31.2 s / 117.0 s (113 turns); ho2 25.2 s / 52.6 s. Two V1.1 turns span a laptop sleep (I070 5,867 s, I091 6,755 s) | A 3B model on CPU, up to 6 model calls per turn (`intake.ts:319`). The explanation in ai-eval.md ("its prompt and tool schemas are longer") is untested and confounded with CPU contention **[infra]** | Open |
 
 **The coordinator** (14 cases, same model):
 
