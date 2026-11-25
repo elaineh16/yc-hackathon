@@ -28,6 +28,12 @@ export type IntakeInput = {
   accessNotes?: string | null;
   /** Cases filed from one multi-issue report share this id. */
   intakeGroup?: string | null;
+  /**
+   * A chat report filed without the assistant's reading, from the resident's own words: by the safety net (the rules
+   * saw a possible emergency before the assistant filed anything), or by a manager reviewing a chat the assistant did
+   * not finish. Classified by the rules alone, and labelled as such.
+   */
+  filedBy?: { kind: "SAFETY_NET" } | { kind: "MANAGER"; name: string } | null;
 };
 export type IntakeResult = {
   caseId: string;
@@ -51,6 +57,16 @@ function resultMessage(r: Pick<IntakeResult, "ref" | "emergency" | "needsReview"
   if (r.emergency) return `Your report is saved as ${r.ref}. ${r.safetyAdvice ?? "If anyone is in danger, call 911."} ${told} It is being handled as an emergency, not as a routine repair.`;
   if (r.needsReview) return `Your report is saved as ${r.ref}. A person will review it and decide who should handle it. ${told}`;
   return `Your report is saved as ${r.ref}. ${r.managersNotified > 0 ? "The property manager has been notified and Relay is lining up a vendor." : told} You can follow progress on this page.`;
+}
+
+/** A chat report filed without the assistant (see IntakeInput.filedBy): the rules read the resident's words. */
+function classifyFromChat(description: string, by: NonNullable<IntakeInput["filedBy"]>): Classification {
+  const t = triage({ description });
+  const why =
+    by.kind === "SAFETY_NET"
+      ? "Filed from the chat by Relay's safety rules, before the assistant had filed it: the resident's words describe a possible emergency."
+      : `Filed by ${by.name} from a chat the assistant did not finish.`;
+  return { ...t, reasons: [why, ...t.reasons], details: {}, source: "RULES", observations: [], assumptions: [], openQuestions: [] };
 }
 
 /** The form path: the category's questions, validated, triaged by rules. */
@@ -77,7 +93,7 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
   if (description.length < 8) problems.push("description");
   if (clientRequestId.length < 8) problems.push("clientRequestId");
   if (!isUuid(raw?.unitId)) problems.push("unitId");
-  if (channel !== "TEXT" && !raw?.agent) problems.push("agent");
+  if (channel !== "TEXT" && !raw?.agent && !raw?.filedBy) problems.push("agent");
   if (problems.length) throw new HttpError(400, `The report is missing: ${problems.join(", ")}.`, { code: "invalid_report", fields: problems });
 
   return traced("relay.intake", { channel, residentId }, async () => {
@@ -88,7 +104,7 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
     const residency = await prisma.residency.findFirst({ where: { userId: residentId, unitId: raw.unitId, active: true }, include: { unit: true } });
     if (!residency) throw new HttpError(403, "You can only report issues for a unit you live in.");
 
-    const t = channel === "TEXT" ? classifyForm(description, raw) : classifyAgent(description, raw.agent!, channel);
+    const t = raw.filedBy ? classifyFromChat(description, raw.filedBy) : channel === "TEXT" ? classifyForm(description, raw) : classifyAgent(description, raw.agent!, channel);
 
     try {
       return await prisma.$transaction(async (tx) => {
@@ -122,7 +138,16 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
           include: CASE_INCLUDE,
         });
         const ref = caseRef(created.number);
-        const via = channel === "VOICE" ? "voice assistant" : channel === "CHAT" ? "chat with Relay's assistant" : "text form";
+        const via =
+          raw.filedBy?.kind === "SAFETY_NET"
+            ? "chat with Relay's assistant, filed by the safety rules"
+            : raw.filedBy?.kind === "MANAGER"
+              ? `chat with Relay's assistant, filed by ${raw.filedBy.name} after the assistant did not finish`
+              : channel === "VOICE"
+                ? "voice assistant"
+                : channel === "CHAT"
+                  ? "chat with Relay's assistant"
+                  : "text form";
         const reportedId = await addEvent(tx, created.id, actor, {
           type: "REPORTED",
           toStatus: "NEW",

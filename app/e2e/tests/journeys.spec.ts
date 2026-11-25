@@ -4,6 +4,7 @@
 //   3. an ambiguous report: a person classifies it, then it routes
 //   4. follow-up: completion asks the resident in-app and by email (captured by Mailpit); "still having problems" reopens
 //   5. failures: a double-submitted report, the AI offline, the discovery provider down, email not configured
+//   6. the chat safety net: a possible emergency is filed at once; a chat the assistant cannot answer reaches a manager
 // Run: cd app/e2e && npx playwright test journeys   (server with RELAY_TEST_HOOKS=true, FIBER_MODE=fixture, Mailpit)
 import { expect, type Page, test } from "@playwright/test";
 import { api, hook, mailTo, resetCases, signIn } from "./helpers";
@@ -215,5 +216,44 @@ test.describe("5. failures are visible and never block the work", () => {
     await manager.goto("/ops/settings");
     await expect(manager.getByText(/Email is not configured on this server/)).toBeVisible();
     await hook("env", { set: { SMTP_HOST: "localhost" } });
+  });
+});
+
+test.describe("6. the chat safety net: nothing a resident writes is left with no one", () => {
+  let resident: Page, manager: Page;
+  test.beforeAll(async ({ browser }) => {
+    await resetCases();
+    resident = await signIn(browser, "priya", PHONE);
+    manager = await signIn(browser, "morgan");
+  });
+  test("a possible emergency typed into the chat is filed at once by the safety rules", async () => {
+    await resident.goto("/my/report");
+    await resident.getByRole("tab", { name: "Chat with Relay" }).click();
+    await resident.getByLabel("Message to Relay").fill("There's a strong smell of gas in my kitchen.");
+    await resident.getByRole("button", { name: "Send" }).click();
+    await expect(resident.getByText(/passed it to your property manager straight away/)).toBeVisible();
+    await expect(resident.getByText(/Leave the unit now/)).toBeVisible();
+    await expect(resident.getByText(/Filed as RLY-\d{4}/)).toBeVisible();
+  });
+  test("with the assistant offline, a manager reads the chat and files it from the command center", async () => {
+    const ai = await api("priya", "getAiStatus");
+    test.skip(ai.available, "the model is available on this server");
+    await resident.goto("/my/report");
+    await resident.getByRole("tab", { name: "Chat with Relay" }).click();
+    await resident.getByLabel("Message to Relay").fill("The bathroom fan has become very loud.");
+    await resident.getByRole("button", { name: "Send" }).click();
+    await expect(resident.getByText(/passed it to your property manager so a person reads it/)).toBeVisible({ timeout: 60_000 });
+    await manager.goto("/ops");
+    const panel = manager.getByTestId("unfinished-chats");
+    await expect(panel).toContainText("Priya Nair");
+    await expect(panel).toContainText("The bathroom fan has become very loud.");
+    await panel.getByRole("button", { name: "File it as a case" }).click();
+    await expect(manager).toHaveURL(/\/ops\/cases\//);
+    await expect(manager.getByText("The bathroom fan has become very loud.").first()).toBeVisible();
+    // The resident has usually left the chat by now: they are told in their inbox that a person filed it.
+    await resident.goto("/my");
+    await resident.getByRole("button", { name: /Notifications/ }).click();
+    await expect(resident.getByText(/Your report was filed: RLY-\d{4}/).first()).toBeVisible();
+    await resident.keyboard.press("Escape");
   });
 });

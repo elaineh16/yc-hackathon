@@ -7,7 +7,7 @@ import type { Category, Severity } from "../shared/domain";
 import type { AiStatus, CaseFilters, Me } from "../shared/views";
 import { actorOf, type Ctx, requireRole } from "./access";
 import { decideProposal as decideProposalFn, kickCoordinator, requestReassessment as requestReassessmentFn } from "./agent/coordinator";
-import { getConversation, sendIntakeMessage as sendIntakeMessageFn, submitVoiceReport as submitVoiceReportFn } from "./agent/intake";
+import { closeChatFiledByForm, closeUnfinishedChat as closeUnfinishedChatFn, fileUnfinishedChat as fileUnfinishedChatFn, getConversation, sendIntakeMessage as sendIntakeMessageFn, submitVoiceReport as submitVoiceReportFn } from "./agent/intake";
 import { llmStatus } from "./agent/llm";
 import * as flow from "./cases/flow";
 import { createCase, type IntakeInput } from "./cases/intake";
@@ -75,10 +75,16 @@ export const updateMyNotifications = async (args: { email?: string | null; email
 // ───────────────────────── resident ─────────────────────────
 
 /** The fallback form: works with no AI at all. */
-export const reportIssue = async (args: IntakeInput, ctx: Ctx) => {
+// Only the form's own fields are taken from the client: internal ones (the agent's reading, who filed a chat, a
+// multi-issue group) are set by the server alone.
+export const reportIssue = async (args: IntakeInput & { fromConversationId?: string }, ctx: Ctx) => {
   const a = requireRole(ctx, "RESIDENT");
   useLimit("reports", a.userId);
-  return write(createCase(a, { ...args, channel: "TEXT", agent: undefined, intakeGroup: undefined }));
+  const { unitId, description, clientRequestId, categoryHint, details, title, permissionToEnter, accessNotes } = args ?? ({} as typeof args);
+  const res = await write(createCase(a, { unitId, description, clientRequestId, channel: "TEXT", categoryHint, details, title, permissionToEnter, accessNotes }));
+  // Filed from a chat with the resident's words: that chat is closed with this case instead of waiting for review.
+  if (args?.fromConversationId) await closeChatFiledByForm(a, args.fromConversationId, { caseId: res.caseId, ref: res.ref, unitId: String(unitId) }).catch(() => false);
+  return res;
 };
 export const getIntakeConversation = async (args: { unitId: string; fresh?: boolean; conversationId?: string }, ctx: Ctx) => getConversation(requireRole(ctx, "RESIDENT"), args);
 /** Saves the message and returns at once; Relay's reply is produced by a background job. */
@@ -131,6 +137,9 @@ export const cancelVisit = async (args: { caseId: string; reason: string }, ctx:
 
 const manager = (ctx: Ctx) => requireRole(ctx, "MANAGER");
 export const getCommandCenter = async (_args: void, ctx: Ctx) => read.commandCenter(manager(ctx));
+/** The intake safety net: a manager files a chat the assistant did not finish as a case, or closes it with a reason. */
+export const fileUnfinishedChat = async (args: { conversationId: string }, ctx: Ctx) => write(fileUnfinishedChatFn(manager(ctx), args), manager(ctx).userId);
+export const closeUnfinishedChat = async (args: { conversationId: string; note: string }, ctx: Ctx) => closeUnfinishedChatFn(manager(ctx), args);
 export const searchCases = async (args: CaseFilters | void, ctx: Ctx) => read.listCases(manager(ctx), args ?? undefined);
 export const getEligibleVendors = async (args: { caseId: string }, ctx: Ctx) => read.eligibleVendors(manager(ctx), args?.caseId);
 export const reviewTriage = async (args: { caseId: string; category: Category; severity: Severity; note?: string }, ctx: Ctx) => write(flow.reviewTriage(manager(ctx), args), manager(ctx).userId);

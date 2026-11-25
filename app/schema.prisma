@@ -447,9 +447,18 @@ model IntakeConversation {
   pendingAttempts Int                @default(0)
   // The last failure, in plain words, when a reply could not be produced.
   lastError       String?
+  // The safety net (agent/intakeSafety.ts): a conversation the assistant could not answer, or that the resident left
+  // before anything was filed, is put in front of the property's managers. A manager files it as a case or closes it.
+  reviewSince     DateTime?
+  reviewReason    String?
+  reviewedAt      DateTime?
+  reviewedById    Int?
+  reviewOutcome   String?
+  reviewNote      String?
 
   @@index([residentId, status])
   @@index([pendingSince])
+  @@index([reviewSince, reviewOutcome])
 }
 
 enum AgentKind {

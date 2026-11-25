@@ -21,6 +21,8 @@ function Report({ me }: { me: Me }) {
   const [unitId, setUnitId] = useState(me.units[0]?.id ?? "");
   const [mode, setMode] = useState<Mode | null>(null);
   const [draft, setDraft] = useState("");
+  // The chat the words came from, when the resident moves to the form with them: filing closes that chat.
+  const [fromChat, setFromChat] = useState<string | null>(null);
   const effective: Mode = mode ?? (ai?.available === false ? "form" : "chat");
   if (me.units.length === 0) return <Notice tone="warn">Your account is not linked to a unit yet. Ask your property manager to add you.</Notice>;
   return (
@@ -57,9 +59,9 @@ function Report({ me }: { me: Me }) {
           {ai.reason} The form below works without it.
         </Notice>
       )}
-      {effective === "chat" && <Chat unitId={unitId} onUnavailable={(text) => (setDraft(text), setMode("form"))} />}
+      {effective === "chat" && <Chat unitId={unitId} onUnavailable={(text, conversationId) => (setDraft(text), setFromChat(conversationId), setMode("form"))} />}
       {effective === "voice" && <VoiceIntake unitId={unitId} />}
-      {effective === "form" && <ReportForm unitId={unitId} initialText={draft} />}
+      {effective === "form" && <ReportForm unitId={unitId} initialText={draft} fromConversationId={fromChat} />}
     </>
   );
 }
@@ -74,7 +76,7 @@ function Elapsed({ since }: { since: string }) {
   return <span className="font-mono tnum">{Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000))} s</span>;
 }
 
-function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text: string) => void }) {
+function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text: string, conversationId: string) => void }) {
   const navigate = useNavigate();
   const [poll, setPoll] = useState(false);
   // Follow one conversation by id, so a filed conversation keeps showing its result instead of a fresh greeting.
@@ -152,7 +154,7 @@ function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text:
         <Notice tone="warn" className="mx-4 mb-3" title="Relay's assistant is offline">
           Your messages are saved. The form works without the assistant.
           <span className="mt-2 block">
-            <Button size="sm" onClick={() => onUnavailable(words)}>
+            <Button size="sm" onClick={() => onUnavailable(words, view.id)}>
               Use the form with my words
             </Button>
           </span>
@@ -189,7 +191,7 @@ function Chat({ unitId, onUnavailable }: { unitId: string; onUnavailable: (text:
 }
 
 /** The fallback: the category's questions, triaged by deterministic rules. Works with no AI at all. */
-function ReportForm({ unitId, initialText }: { unitId: string; initialText: string }) {
+function ReportForm({ unitId, initialText, fromConversationId }: { unitId: string; initialText: string; fromConversationId: string | null }) {
   const navigate = useNavigate();
   const [category, setCategory] = useState<Category>("PLUMBING");
   const [description, setDescription] = useState(initialText);
@@ -207,7 +209,7 @@ function ReportForm({ unitId, initialText }: { unitId: string; initialText: stri
     setBusy(true);
     setError(null);
     try {
-      const r = await reportIssue({ unitId, clientRequestId: attempt, channel: "TEXT", description, categoryHint: category, details: answers, title: title || null, permissionToEnter: enter, accessNotes: access || null });
+      const r = await reportIssue({ unitId, clientRequestId: attempt, channel: "TEXT", description, categoryHint: category, details: answers, title: title || null, permissionToEnter: enter, accessNotes: access || null, fromConversationId: fromConversationId ?? undefined });
       setResult({ caseId: r.caseId, message: r.message, emergency: r.emergency });
     } catch (err) {
       setError(errorText(err));

@@ -72,7 +72,7 @@ query getCase { fn: import { getCase } from "@src/server/ops", entities: [Case, 
 query getNotifications { fn: import { getNotifications } from "@src/server/ops", entities: [Notification] }
 query getMyCases { fn: import { getMyCases } from "@src/server/ops", entities: [Case, VendorAssignment] }
 query getIntakeConversation { fn: import { getIntakeConversation } from "@src/server/ops", entities: [IntakeConversation] }
-query getCommandCenter { fn: import { getCommandCenter } from "@src/server/ops", entities: [Case, CaseEvent, AgentProposal, AgentRun, Notification, VendorDiscovery, VendorCandidate] }
+query getCommandCenter { fn: import { getCommandCenter } from "@src/server/ops", entities: [Case, CaseEvent, AgentProposal, AgentRun, Notification, VendorDiscovery, VendorCandidate, IntakeConversation] }
 query searchCases { fn: import { searchCases } from "@src/server/ops", entities: [Case, VendorAssignment] }
 query getEligibleVendors { fn: import { getEligibleVendors } from "@src/server/ops", entities: [Vendor, VendorAssignment, PropertyVendor] }
 query getSettings { fn: import { getSettings } from "@src/server/ops", entities: [Property, Unit, Vendor, PropertyVendor, User] }
@@ -85,7 +85,7 @@ query getMyJobs { fn: import { getMyJobs } from "@src/server/ops", entities: [Ca
 action markNotificationsRead { fn: import { markNotificationsRead } from "@src/server/ops", entities: [Notification] }
 action acknowledgeNotification { fn: import { acknowledgeNotification } from "@src/server/ops", entities: [Notification] }
 action updateMyNotifications { fn: import { updateMyNotifications } from "@src/server/ops", entities: [User] }
-action reportIssue { fn: import { reportIssue } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action reportIssue { fn: import { reportIssue } from "@src/server/ops", entities: [Case, CaseEvent, Notification, IntakeConversation] }
 action sendIntakeMessage { fn: import { sendIntakeMessage } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
 action submitVoiceReport { fn: import { submitVoiceReport } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
 action startVoiceIntake { fn: import { startVoiceIntake } from "@src/server/ops", entities: [] }
@@ -93,6 +93,8 @@ action chooseVisitTime { fn: import { chooseVisitTime } from "@src/server/ops", 
 action declineVisitTimes { fn: import { declineVisitTimes } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }
 action confirmResolution { fn: import { confirmResolution } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
 action reopenCase { fn: import { reopenCase } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action fileUnfinishedChat { fn: import { fileUnfinishedChat } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
+action closeUnfinishedChat { fn: import { closeUnfinishedChat } from "@src/server/ops", entities: [IntakeConversation] }
 action cancelCase { fn: import { cancelCase } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
 action cancelVisit { fn: import { cancelVisit } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }
 action reviewTriage { fn: import { reviewTriage } from "@src/server/ops", entities: [Case, CaseEvent] }

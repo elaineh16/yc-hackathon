@@ -300,7 +300,7 @@ describe("concurrency and interruption", () => {
     assert.equal(p.discoveries[0].errorCode, "interrupted");
     assert.match(p.discoveries[0].errorMessage, /interrupted 3 times/);
     assert.equal((await taylor.must("getCase", { caseId })).status, "AWAITING_ASSIGNMENT");
-    await hook("fault", { point: "none", times: 0 });
+    await hook("fault", { point: "discovery.beforeCandidates", times: 0 });
   });
 });
 

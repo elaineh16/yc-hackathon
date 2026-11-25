@@ -6,7 +6,8 @@ import { prisma } from "wasp/server";
 import { type Actor, caseRef, type CaseStatus, CASE_STATUSES, CATEGORIES, type Category, HOLDERS, type Holder, isTrade, managerHandled, type Role, SEVERITIES, type Severity, type TriageSource } from "../../shared/domain";
 import { type Details, optionLabel, QUESTIONS } from "../../shared/intake";
 import { canPerform } from "../../shared/machine";
-import type { ActivityItem, AgentRunView, AiProposalView, AssignmentView, CaseAbilities, CaseAi, CaseDetail, CaseFilters, CaseListItem, CasePage, CommandCenter, EventView, FollowUpView, Inbox, JobBoard, JobItem, QueueItem, SlotView, VendorOption } from "../../shared/views";
+import type { ActivityItem, AgentRunView, AiProposalView, AssignmentView, CaseAbilities, CaseAi, CaseDetail, CaseFilters, CaseListItem, CasePage, CommandCenter, EventView, FollowUpView, Inbox, JobBoard, JobItem, QueueItem, SlotView, UnfinishedChat, VendorOption } from "../../shared/views";
+import { REVIEW_REASONS, residentWordsOf, safetyScreen } from "../agent/intakeSafety";
 import { assertCaseAccess, managedPropertyIds, visibleCasesWhere } from "../access";
 import { approvedVendorsFor } from "../vendors/directory";
 import { discoveryQueue } from "../vendors/discovery";
@@ -367,6 +368,25 @@ function whyHuman(c: ListRow, now: Date): string {
   return c.nextAction;
 }
 
+/** Chat reports waiting for a manager because the assistant did not finish them (agent/intakeSafety.ts). */
+async function unfinishedChats(propertyIds: string[]): Promise<UnfinishedChat[]> {
+  const units = await prisma.unit.findMany({ where: { propertyId: { in: propertyIds } }, select: { id: true, label: true, property: { select: { name: true } } } });
+  if (!units.length) return [];
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const rows = await prisma.intakeConversation.findMany({
+    where: { unitId: { in: units.map((u) => u.id) }, reviewSince: { not: null }, reviewOutcome: null, caseId: null },
+    orderBy: { reviewSince: "asc" },
+    take: 20,
+    include: { resident: { select: { displayName: true } } },
+  });
+  return rows.map((c) => {
+    const words = residentWordsOf(c.messages);
+    const u = byId.get(c.unitId);
+    const reason = c.reviewReason === "assistant_failed" ? "assistant_failed" : "unfinished";
+    return { id: c.id, residentName: c.resident.displayName, unitLabel: u?.label ?? "", propertyName: u?.property.name ?? "", reason, reasonText: REVIEW_REASONS[reason], since: c.reviewSince!.toISOString(), words: words.length > 600 ? `${words.slice(0, 597)}…` : words, urgent: safetyScreen(words).severity !== "ROUTINE" };
+  });
+}
+
 export async function commandCenter(actor: ActorCtx): Promise<CommandCenter> {
   const now = new Date();
   const day = new Date(now.getTime() - 24 * 3600_000);
@@ -446,6 +466,7 @@ export async function commandCenter(actor: ActorCtx): Promise<CommandCenter> {
     overdueAcks: overdueAckRows.map((n) => ({ id: n.id, caseId: n.caseId, caseRef: n.case ? caseRef(n.case.number) : null, recipient: n.user.displayName, role: n.user.role as Role, title: n.title, dueAt: n.ackDueAt!.toISOString() })),
     aiRuns: runs24.slice(0, 10).map((r) => ({ id: r.id, caseId: r.caseId!, caseRef: r.case ? caseRef(r.case.number) : "", trigger: r.trigger, status: r.status, durationMs: r.durationMs, at: r.createdAt.toISOString(), summary: runSummary(r) })),
     suggestions: suggestions.map((p) => ({ ...proposalView(p), caseId: p.caseId, caseRef: caseRef(p.case.number), caseTitle: p.case.title })),
+    unfinishedChats: await unfinishedChats(propertyIds),
     attention: attention.map(item),
     waitingOnManager: onManager.map(item),
     waitingOnContractors: onContractors.map(item),

@@ -7,7 +7,8 @@
 import { prisma } from "wasp/server";
 import { caseRef } from "../../shared/domain";
 import { kickCoordinator } from "../agent/coordinator";
-import { kickIntake } from "../agent/intake";
+import { flagForReview, kickIntake } from "../agent/intake";
+import { idleMinutes, idleReviewDue } from "../agent/intakeSafety";
 import { deliverNow, type DeliveryResult } from "../notify/email";
 import { mark } from "../tracing";
 import { kickDiscovery } from "../vendors/discovery";
@@ -29,6 +30,8 @@ export type SweepResult = {
   discoveriesResumed: number;
   discoveriesFailed: number;
   intakeTurnsRequeued: number;
+  /** Unfinished chats put in front of a person (the resident stopped replying before anything was filed). */
+  intakeReviews: number;
   email: DeliveryResult | null;
 };
 
@@ -47,6 +50,7 @@ export async function sweepDeadlines(now: Date = new Date(), o: { deliverEmail?:
     discoveriesResumed: 0,
     discoveriesFailed: 0,
     intakeTurnsRequeued: 0,
+    intakeReviews: 0,
     email: null,
   };
 
@@ -241,6 +245,20 @@ export async function sweepDeadlines(now: Date = new Date(), o: { deliverEmail?:
   const turns = await prisma.intakeConversation.findMany({ where: { status: "OPEN", pendingSince: { lt: new Date(now.getTime() - 3 * 60_000) } }, select: { id: true }, take: 10 });
   for (const t of turns) await kickIntake(t.id);
   result.intakeTurnsRequeued = turns.length;
+
+  // 10b. The chat safety net: a conversation the resident left before anything was filed goes to the property's
+  // managers. One with nothing the resident said is closed instead, so it never blocks this query.
+  const idle = await prisma.intakeConversation.findMany({
+    where: { status: "OPEN", caseId: null, reviewSince: null, pendingSince: null, updatedAt: { lt: new Date(now.getTime() - idleMinutes() * 60_000) } },
+    select: { id: true, status: true, caseId: true, reviewSince: true, pendingSince: true, updatedAt: true, messages: true },
+    orderBy: { updatedAt: "asc" },
+    take: 25,
+  });
+  for (const c of idle) {
+    if (idleReviewDue(c, now)) {
+      if (await flagForReview(c.id, "unfinished").catch(() => false)) result.intakeReviews++;
+    } else await prisma.intakeConversation.updateMany({ where: { id: c.id, status: "OPEN", caseId: null, pendingSince: null, updatedAt: c.updatedAt }, data: { status: "ABANDONED" } });
+  }
 
   // 11. Email: send what is due (retries with backoff live on the rows themselves).
   if (o.deliverEmail !== false) result.email = await deliverNow();

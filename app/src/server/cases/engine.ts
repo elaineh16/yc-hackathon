@@ -173,6 +173,13 @@ export const faults = {
     armed.set(point, left - 1);
     throw new Error(`Injected fault at ${point}`);
   },
+  /** True once if a test armed this point: for faults that are not exceptions, such as the server dying mid-run. */
+  take(point: string) {
+    const left = armed.get(point) ?? 0;
+    if (left <= 0) return false;
+    armed.set(point, left - 1);
+    return true;
+  },
 };
 
 export const fmtWhen = (d: Date) =>

@@ -127,9 +127,27 @@ export const testHook = async (req: Request, res: Response, _ctx: unknown) => {
       return res.json({ ok: true, result: await sweepDeadlines(now, { deliverEmail: body.deliverEmail !== false }) });
     }
     case "fault":
+      // `times: 0` disarms the point.
       if (typeof body.point !== "string") return res.status(400).json({ message: "point is required" });
       faults.arm(body.point, typeof body.times === "number" ? body.times : 1);
       return res.json({ ok: true });
+    case "intakeAge": {
+      // Ages a chat's pending turn as if `minutes` had passed since its run started, so a run the server died in is
+      // stale at once. `minutes: 0` only reports the turn. 409 until the turn's job has claimed it.
+      if (typeof body.conversationId !== "string") return res.status(400).json({ message: "conversationId is required" });
+      const minutes = Number(body.minutes ?? 0);
+      if (!(minutes >= 0 && minutes <= 120)) return res.status(400).json({ message: "minutes must be between 0 and 120" });
+      const conv = await prisma.intakeConversation.findUnique({ where: { id: body.conversationId } });
+      if (!conv?.pendingSince) return res.status(409).json({ message: "No turn is pending." });
+      const run = await prisma.agentRun.findFirst({ where: { conversationId: conv.id, kind: "INTAKE", status: "RUNNING" }, orderBy: { createdAt: "desc" } });
+      if (!run) return res.status(409).json({ message: "The turn has not been claimed yet." });
+      if (minutes > 0) {
+        const back = (d: Date) => new Date(d.getTime() - minutes * 60_000);
+        await prisma.agentRun.update({ where: { id: run.id }, data: { createdAt: back(run.createdAt) } });
+        await prisma.intakeConversation.update({ where: { id: conv.id }, data: { pendingSince: back(conv.pendingSince) } });
+      }
+      return res.json({ ok: true, attempts: conv.pendingAttempts, runError: run.error });
+    }
     default:
       return res.status(404).json({ message: "Unknown test hook" });
   }

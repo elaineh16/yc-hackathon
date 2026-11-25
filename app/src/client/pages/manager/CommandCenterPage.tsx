@@ -1,15 +1,15 @@
 // The manager's command center. Every number is counted from the database on each refresh; nothing is estimated.
-import { AlarmClock, ArrowUpRight, Bot, Building2, CircleAlert, Sparkles } from "lucide-react";
-import type { ReactNode } from "react";
-import { Link } from "react-router";
-import { getCommandCenter, useQuery } from "wasp/client/operations";
+import { AlarmClock, ArrowUpRight, Bot, Building2, CircleAlert, MessageSquareWarning, Sparkles } from "lucide-react";
+import { type ReactNode, useState } from "react";
+import { Link, useNavigate } from "react-router";
+import { closeUnfinishedChat, fileUnfinishedChat, getCommandCenter, useQuery } from "wasp/client/operations";
 import { CATEGORY_SHORT, isTrade, TRADE_NOUN } from "../../../shared/domain";
-import type { CaseListItem, CommandCenter } from "../../../shared/views";
+import type { CaseListItem, CommandCenter, UnfinishedChat } from "../../../shared/views";
 import { SeverityBadge, StatusBadge } from "../../components/case";
 import { eventKind, eventLabel, Provenance, Ref } from "../../components/provenance";
 import { PageTitle, Shell } from "../../components/shell";
-import { clock, dueIn, when } from "../../lib";
-import { Badge, cn, Empty, Panel, PanelHeader, Spinner } from "../../ui";
+import { clock, dueIn, useAction, when } from "../../lib";
+import { Badge, Button, cn, Empty, Input, Notice, Panel, PanelHeader, Spinner } from "../../ui";
 
 export function CommandCenterPage() {
   return <Shell role="MANAGER" wide>{(me) => <Command name={me.name.split(" ")[0]} />}</Shell>;
@@ -81,6 +81,7 @@ function Command({ name }: { name: string }) {
               <CaseRows items={d.attention} />
             </Panel>
           )}
+          {d.unfinishedChats.length > 0 && <UnfinishedChats items={d.unfinishedChats} />}
           <Panel>
             <PanelHeader title="Your move" action={<Link to="/ops/cases?holder=MANAGER" className="flex items-center gap-1 text-xs text-muted hover:text-ink">All <ArrowUpRight className="size-3.5" /></Link>}>
               Human intervention queue: what needs a person now, most urgent first, and why.
@@ -295,3 +296,71 @@ export function CaseRows({ items, compact }: { items: CaseListItem[]; compact?: 
 }
 
 export const AiBadge = () => <Provenance kind="ai-action" label="AI" />;
+
+/** The intake safety net: chats the assistant did not finish. A person files each one as a case, or closes it. */
+function UnfinishedChats({ items }: { items: UnfinishedChat[] }) {
+  return (
+    <Panel className="border-[#f3d19c]" data-testid="unfinished-chats">
+      <PanelHeader title={<span className="flex items-center gap-2"><MessageSquareWarning className="size-4 text-warn" /> Unfinished chat reports</span>}>
+        Residents wrote to Relay's assistant, but it could not finish and nothing was filed. Read what they said, then file it or close it.
+      </PanelHeader>
+      <ul className="divide-y divide-line">
+        {items.map((c) => (
+          <li key={c.id}>
+            <UnfinishedRow c={c} />
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+function UnfinishedRow({ c }: { c: UnfinishedChat }) {
+  const a = useAction();
+  const navigate = useNavigate();
+  const [closing, setClosing] = useState(false);
+  const [note, setNote] = useState("");
+  return (
+    <div className="px-4 py-3">
+      <p className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium">{c.residentName}</span>
+        <span className="text-muted">
+          {c.propertyName}, unit {c.unitLabel}
+        </span>
+        {c.urgent && <Badge tone="danger">Urgent by the safety rules</Badge>}
+        <Badge tone="outline">{c.reasonText}</Badge>
+        <span className="ml-auto text-xs text-faint">{when(c.since)}</span>
+      </p>
+      <blockquote className="mt-2 line-clamp-4 border-l-2 border-line pl-3 text-sm whitespace-pre-line text-ink-2">{c.words}</blockquote>
+      {a.error && <Notice tone="danger" className="mt-2">{a.error}</Notice>}
+      {closing ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Input className="min-w-64 flex-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why no report is needed (for example: called them, it's a duplicate)" aria-label="Why no report is needed" />
+          <Button size="sm" variant="outline" disabled={note.trim().length < 3} busy={a.busy === "close"} onClick={() => a.run("close", () => closeUnfinishedChat({ conversationId: c.id, note }))}>
+            Close it
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setClosing(false)}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="move"
+            busy={a.busy === "file"}
+            onClick={async () => {
+              const r = await a.run("file", () => fileUnfinishedChat({ conversationId: c.id }));
+              if (r?.caseId) navigate(`/ops/cases/${r.caseId}`);
+            }}
+          >
+            File it as a case
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setClosing(true)}>
+            Close without a case
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

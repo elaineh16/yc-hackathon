@@ -47,7 +47,7 @@ export function user(sessionId: string | null): User {
   };
 }
 
-export async function hook(name: "reset" | "sweep" | "fault" | "fiber" | "fiberCalls" | "discover" | "deliver" | "env", body: Record<string, unknown> = {}) {
+export async function hook(name: "reset" | "sweep" | "fault" | "fiber" | "fiberCalls" | "discover" | "deliver" | "env" | "intakeAge", body: Record<string, unknown> = {}) {
   const res = await fetch(`${BASE}/api/test/${name}`, { method: "POST", headers: { "Content-Type": "application/json", ...(process.env.RELAY_TEST_HOOKS_TOKEN ? { "x-relay-test-token": process.env.RELAY_TEST_HOOKS_TOKEN } : {}) }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`test hook ${name} -> ${res.status}. Is the server running with RELAY_TEST_HOOKS=true?`);
   const out = await res.json();

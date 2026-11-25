@@ -10,13 +10,16 @@ import { randomUUID } from "node:crypto";
 import { HttpError, prisma } from "wasp/server";
 import { intakeTurnJob } from "wasp/server/jobs";
 import { caseRef, CATEGORIES, SEVERITIES } from "../../shared/domain";
+import { managedPropertyIds } from "../access";
 import { createCase, type IntakeResult } from "../cases/intake";
-import { type ActorCtx, faults } from "../cases/engine";
+import { type ActorCtx, faults, isUuid, managerIds } from "../cases/engine";
+import { notify } from "../notify/notify";
 import { reopenCase, verifyResolution } from "../cases/flow";
 import { kickEmail } from "../notify/email";
 import { mark, traced } from "../tracing";
 import { kickCoordinator } from "./coordinator";
 import { guardReply, intakeSystemPrompt, REOPEN_SCHEMA, secretsIn, SUBMIT_SCHEMA, type SubmitArgs, validateSubmit } from "./intakePolicy";
+import { REVIEW_REASONS, type ReviewReason, residentWordsOf, safetyScreen } from "./intakeSafety";
 import { searchKnowledge } from "./knowledge";
 import { LlmUnavailable, llmConfig, type ChatMessage } from "./llm";
 import { bool, cleanFacts, oneOf, runLoop, str, type Step, type Tool } from "./loop";
@@ -111,10 +114,175 @@ export async function sendIntakeMessage(actor: ActorCtx, input: { conversationId
   await residencyFor(actor.userId!, conv.unitId);
   const history = [...(conv.messages as ChatTurn[]), { role: "resident" as const, text, at: new Date().toISOString() }];
   // Compare-and-set: one message at a time, so a double send cannot queue two replies.
-  const saved = await prisma.intakeConversation.updateMany({ where: { id: conv.id, status: "OPEN", pendingSince: null }, data: { messages: history, pendingSince: new Date(), pendingAttempts: 0, lastError: null } });
+  // A manager who closed an earlier review has not seen this message: a later failure puts it in front of them again.
+  const reopenReview = conv.reviewOutcome === "closed" ? { reviewSince: null, reviewReason: null, reviewOutcome: null, reviewedAt: null, reviewedById: null, reviewNote: null } : {};
+  const saved = await prisma.intakeConversation.updateMany({ where: { id: conv.id, status: "OPEN", pendingSince: null }, data: { messages: history, pendingSince: new Date(), pendingAttempts: 0, lastError: null, ...reopenReview } });
   if (saved.count === 0) throw new HttpError(409, "Relay is still replying to your last message.", { code: "turn_pending" });
+  // The safety net, before the model: a possible emergency in the resident's own words is filed now, by the server,
+  // with the same rules that classify every report. It does not wait for the model, or depend on it answering.
+  if (safetyScreen(residentWordsOf(history)).emergency) {
+    const filed = await fileFromChat(conv.id, { kind: "SAFETY_NET" }).catch((e) => {
+      console.warn("[intake] the safety net could not file the report; the assistant will answer and a failure goes to a person:", (e as Error)?.name);
+      return null;
+    });
+    if (filed) {
+      mark("relay.intake.safety_net.filed", { conversationId: conv.id, caseId: filed.caseId });
+      return reload(conv.id);
+    }
+  }
   await kickIntake(conv.id);
   return reload(conv.id);
+}
+
+/**
+ * Files a chat report from the resident's own words, without the assistant: by the safety net (a possible emergency)
+ * or by a manager reviewing an unfinished chat. Idempotent: the conversation's request id returns the same case.
+ */
+async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } | { kind: "MANAGER"; name: string; userId: number }) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const c = await prisma.intakeConversation.findUnique({ where: { id: conversationId }, include: { resident: { select: { displayName: true } } } });
+    if (!c) return null;
+    // Already filed (by the assistant, the form or a person): never a second case.
+    if (c.caseId) {
+      const k = await prisma.case.findUnique({ where: { id: c.caseId }, select: { number: true } });
+      return { caseId: c.caseId, ref: k ? caseRef(k.number) : "", message: "", repeated: true };
+    }
+    const words = residentWordsOf(c.messages).trim();
+    if (!words) return null;
+    const actor: ActorCtx = { kind: "RESIDENT", userId: c.residentId, name: c.resident.displayName, vendorId: null };
+    const res = await createCase(actor, { unitId: c.unitId, channel: "CHAT", clientRequestId: c.clientRequestId, description: words, filedBy: by.kind === "SAFETY_NET" ? { kind: "SAFETY_NET" } : { kind: "MANAGER", name: by.name } });
+    const reply =
+      by.kind === "SAFETY_NET"
+        ? `This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. ${res.message}`
+        : `${by.name} from your property's management read this conversation and filed it for you as ${res.ref}. You can follow it in Relay.`;
+    const now = new Date();
+    const prior = ((c.facts ?? {}) as Record<string, unknown>)[FILED_KEY];
+    // Compare-and-set on the last change, so a message the resident sent meanwhile is never overwritten.
+    const w = await prisma.intakeConversation.updateMany({
+      where: { id: c.id, caseId: null, updatedAt: c.updatedAt },
+      data: {
+        status: "SUBMITTED",
+        caseId: res.caseId,
+        pendingSince: null,
+        lastError: null,
+        messages: [...(c.messages as ChatTurn[]), { role: "relay", text: reply, at: now.toISOString() }] as object[],
+        facts: { ...((c.facts ?? {}) as object), [FILED_KEY]: [...(Array.isArray(prior) ? prior : []), { caseId: res.caseId, ref: res.ref, action: "filed" }] } as object,
+        ...(c.reviewSince && !c.reviewOutcome ? { reviewOutcome: "filed", reviewedAt: now, reviewedById: by.kind === "MANAGER" ? by.userId : null } : {}),
+      },
+    });
+    if (w.count === 1) {
+      await settleReviewAlerts(c.id);
+      // The resident is usually not on the chat page any more: tell them a person read it and filed it.
+      if (by.kind === "MANAGER") {
+        await prisma.$transaction((tx) => notify(tx, [c.residentId], res.caseId, "chat-filed", { kind: "UPDATE", email: true, title: `Your report was filed: ${res.ref}`, body: `${by.name} read your conversation with Relay's assistant and filed it as ${res.ref}. You can follow it in Relay.` }));
+        kickEmail();
+      }
+      afterFiling([{ caseId: res.caseId, ref: res.ref, action: "filed" }]);
+      return { caseId: res.caseId, ref: res.ref, message: res.message, repeated: res.duplicate };
+    }
+  }
+  throw new Error("the conversation kept changing while it was being filed");
+}
+
+/**
+ * The resident filed with the form from a chat ("Use the form with my words"): that chat is closed as filed with the
+ * form's case, so it does not also wait for a manager's review. Only the resident's own unfiled chat on the same unit.
+ */
+export async function closeChatFiledByForm(actor: ActorCtx, conversationId: unknown, filed: { caseId: string; ref: string; unitId: string }) {
+  if (!isUuid(conversationId)) return false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const c = await prisma.intakeConversation.findFirst({ where: { id: conversationId, residentId: actor.userId!, unitId: filed.unitId, caseId: null } });
+    if (!c || c.status === "SUBMITTED") return false;
+    const now = new Date();
+    const prior = ((c.facts ?? {}) as Record<string, unknown>)[FILED_KEY];
+    const inReview = !!c.reviewSince && !c.reviewOutcome;
+    const w = await prisma.intakeConversation.updateMany({
+      where: { id: c.id, caseId: null, updatedAt: c.updatedAt },
+      data: {
+        status: "SUBMITTED",
+        caseId: filed.caseId,
+        pendingSince: null,
+        messages: [...(c.messages as ChatTurn[]), { role: "relay", text: `You filed this with the form as ${filed.ref}.`, at: now.toISOString() }] as object[],
+        facts: { ...((c.facts ?? {}) as object), [FILED_KEY]: [...(Array.isArray(prior) ? prior : []), { caseId: filed.caseId, ref: filed.ref, action: "filed" }] } as object,
+        ...(inReview ? { reviewOutcome: "filed", reviewedAt: now } : {}),
+      },
+    });
+    if (w.count === 1) {
+      if (inReview) await settleReviewAlerts(c.id);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Puts an unfinished conversation in front of the property's managers: the assistant could not reply, or the resident
+ * left before anything was filed. Returns whether a person now has it (true also when it was already waiting).
+ */
+export async function flagForReview(conversationId: string, reason: ReviewReason): Promise<boolean> {
+  const flagged = await prisma.$transaction(async (tx) => {
+    const c = await tx.intakeConversation.findUnique({ where: { id: conversationId }, include: { resident: { select: { displayName: true } } } });
+    if (!c || c.caseId) return false;
+    if (c.reviewSince && !c.reviewOutcome) return true;
+    const words = residentWordsOf(c.messages).trim();
+    if (!words) return false;
+    const unit = await tx.unit.findUnique({ where: { id: c.unitId } });
+    if (!unit) return false;
+    const now = new Date();
+    const won = await tx.intakeConversation.updateMany({
+      where: { id: c.id, caseId: null, OR: [{ reviewSince: null }, { reviewOutcome: { not: null } }] },
+      data: { reviewSince: now, reviewReason: reason, reviewOutcome: null, reviewedAt: null, reviewedById: null, reviewNote: null },
+    });
+    if (won.count === 0) return true;
+    const urgent = safetyScreen(words).severity !== "ROUTINE";
+    await notify(tx, await managerIds(tx, unit.propertyId), null, `intake-review:${c.id}:${now.getTime()}`, {
+      kind: urgent ? "REVIEW_NEEDED" : "ACTION",
+      event: "intake.review",
+      title: `Unfinished chat report${urgent ? " (urgent by the safety rules)" : ""}: ${c.resident.displayName}, unit ${unit.label}`,
+      body: `${REVIEW_REASONS[reason]}. They wrote: "${words.length > 300 ? `${words.slice(0, 297)}…` : words}" File it as a case or close it from the command center.`,
+    });
+    return true;
+  });
+  if (flagged) kickEmail();
+  return flagged;
+}
+
+async function reviewable(actor: ActorCtx, conversationId: unknown) {
+  if (actor.kind !== "MANAGER") throw new HttpError(403, "Your account cannot do that.");
+  if (!isUuid(conversationId)) throw new HttpError(404, "Not found.");
+  const c = await prisma.intakeConversation.findUnique({ where: { id: conversationId } });
+  const unit = c ? await prisma.unit.findUnique({ where: { id: c.unitId } }) : null;
+  if (!c || !unit || !(await managedPropertyIds(prisma, actor.userId!)).includes(unit.propertyId)) throw new HttpError(404, "Not found.");
+  return c;
+}
+
+/** A manager files an unfinished chat as a case, from the resident's own words. Idempotent. */
+export async function fileUnfinishedChat(actor: ActorCtx, input: { conversationId: string }) {
+  const c = await reviewable(actor, input?.conversationId);
+  if (c.caseId) return { ok: true, repeated: true, caseId: c.caseId };
+  if (!c.reviewSince || c.reviewOutcome) throw new HttpError(409, "This conversation is not waiting for review.", { code: "not_in_review" });
+  const r = await fileFromChat(c.id, { kind: "MANAGER", name: actor.name, userId: actor.userId! });
+  if (!r) throw new HttpError(409, "There is nothing in this conversation to file.", { code: "nothing_to_file" });
+  return { ok: true, repeated: r.repeated, caseId: r.caseId, ref: r.ref };
+}
+
+/** A manager closes an unfinished chat without a case, saying why (for example: called the resident, a duplicate). */
+export async function closeUnfinishedChat(actor: ActorCtx, input: { conversationId: string; note: string }) {
+  const c = await reviewable(actor, input?.conversationId);
+  const note = typeof input.note === "string" ? input.note.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  if (note.length < 3) throw new HttpError(400, "Say briefly why no report is needed.", { code: "note_required" });
+  if (c.caseId) throw new HttpError(409, "It was already filed as a case.", { code: "already_filed" });
+  if (c.reviewOutcome === "closed") return { ok: true, repeated: true };
+  const w = await prisma.intakeConversation.updateMany({ where: { id: c.id, caseId: null, reviewSince: { not: null }, reviewOutcome: null }, data: { reviewOutcome: "closed", reviewedAt: new Date(), reviewedById: actor.userId, reviewNote: note } });
+  if (w.count === 0) throw new HttpError(409, "This conversation is not waiting for review.", { code: "not_in_review" });
+  await settleReviewAlerts(c.id);
+  return { ok: true, repeated: false };
+}
+
+/** Once a person has dealt with an unfinished chat, its alerts are acknowledged: they never show as overdue. */
+async function settleReviewAlerts(conversationId: string) {
+  const now = new Date();
+  await prisma.notification.updateMany({ where: { dedupeKey: { startsWith: `none:intake-review:${conversationId}:` }, channel: "IN_APP", acknowledgedAt: null }, data: { acknowledgedAt: now } });
 }
 
 /** Queue a reply job. Never throws: the minute sweep re-queues any turn left pending. */
@@ -132,6 +300,14 @@ export const intakeTurnJobFn = async (args: { conversationId: string }, _ctx: un
 const OFFLINE_REPLY =
   "I can't reply right now: Relay's AI assistant is offline. Your message is saved. You can send this report with the form instead, which works without the assistant, and a person will read it.";
 const SORRY_REPLY = "Sorry, something went wrong on our side and I could not reply. Your message is saved. You can try again, or send it with the form.";
+// Said only once the conversation is in front of the property's managers (flagForReview returned true).
+const OFFLINE_REPLY_PASSED =
+  "I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which works without the assistant.";
+const SORRY_REPLY_PASSED = "Sorry, something went wrong on our side and I could not reply. Your message is saved, and I've passed it to your property manager so a person reads it. You can try again, or send it with the form.";
+const failureReply = async (conversationId: string, unavailable: boolean) => {
+  const passed = await flagForReview(conversationId, "assistant_failed").catch(() => false);
+  return unavailable ? (passed ? OFFLINE_REPLY_PASSED : OFFLINE_REPLY) : passed ? SORRY_REPLY_PASSED : SORRY_REPLY;
+};
 /** A whole turn (every model call in it) must finish within this. A run still marked running well after it was interrupted. */
 const TURN_BUDGET_MS = Number(process.env.INTAKE_TURN_BUDGET_MS) || 180_000;
 const STALE_TURN_MS = TURN_BUDGET_MS + 60_000;
@@ -161,19 +337,30 @@ export async function runIntakeTurn(conversationId: string): Promise<{ status: s
     } else if (prior.status !== "RUNNING") {
       // Answered already (the marker was left behind), or out of attempts: either way the resident has a reply.
       const answered = prior.status === "SUCCEEDED";
+      const sorry = answered ? "" : await failureReply(conv.id, false);
       await prisma.intakeConversation.updateMany({
         where: { id: conv.id, pendingSince: conv.pendingSince },
-        data: answered ? { pendingSince: null } : { pendingSince: null, lastError: "error", messages: [...history, { role: "relay", text: SORRY_REPLY, at: new Date().toISOString() }] as object[] },
+        data: answered ? { pendingSince: null } : { pendingSince: null, lastError: "error", messages: [...history, { role: "relay", text: sorry, at: new Date().toISOString() }] as object[] },
       });
       return { status: answered ? "already_done" : "failed" };
     } else {
-      // Still running: taken over only once it is past any turn's deadline (the server stopped mid-run).
+      // Still running: taken over only once it is past any turn's deadline (the server stopped mid-run), and only within
+      // the attempt limit: a turn interrupted on every attempt (one that crashes the process) goes to a person instead.
+      if ((conv.pendingAttempts ?? 0) >= MAX_TURN_ATTEMPTS) {
+        const gaveUp = await prisma.agentRun.updateMany({ where: { id: prior.id, status: "RUNNING", createdAt: { lt: new Date(Date.now() - STALE_TURN_MS) } }, data: { status: "FAILED", error: "interrupted on every attempt", finishedAt: new Date() } });
+        if (gaveUp.count === 0) return { status: "already_running" };
+        const sorry = await failureReply(conv.id, false);
+        await prisma.intakeConversation.updateMany({ where: { id: conv.id, pendingSince: conv.pendingSince }, data: { pendingSince: null, lastError: "error", messages: [...history, { role: "relay", text: sorry, at: new Date().toISOString() }] as object[] } });
+        return { status: "failed" };
+      }
       const takeover = await prisma.agentRun.updateMany({ where: { id: prior.id, status: "RUNNING", createdAt: { lt: new Date(Date.now() - STALE_TURN_MS) } }, data: { createdAt: new Date(), error: "taken over after an interrupted run" } });
       if (takeover.count === 0) return { status: "already_running" };
       runId = prior.id;
     }
   }
   await prisma.intakeConversation.update({ where: { id: conv.id }, data: { pendingAttempts: { increment: 1 } } });
+  // test-only: the server dies mid-turn, leaving the run RUNNING and the turn pending, as a crash or a deploy would.
+  if (faults.take("intake.crash")) return { status: "crashed (test)" };
 
   const r = await prisma.residency.findFirst({ where: { userId: conv.residentId, unitId: conv.unitId, active: true }, include: { unit: { include: { property: true } }, user: true } });
   if (!r) {
@@ -303,11 +490,13 @@ export async function runIntakeTurn(conversationId: string): Promise<{ status: s
         pendingSince: null,
         lastError,
         ...(caseId ? { caseId } : {}),
+        ...(status === "SUBMITTED" && conv.reviewSince && !conv.reviewOutcome ? { reviewOutcome: "filed", reviewedAt: new Date() } : {}),
         facts: { ...facts, [FILED_KEY]: [...(Array.isArray(prior) ? prior : []), ...filed] } as object,
         messages: [...history, { role: "relay", text: reply, at: new Date().toISOString() }] as object[],
       },
     });
     if (w.count === 0) mark("relay.agent.intake.superseded", { conversationId: conv.id });
+    else if (status === "SUBMITTED" && conv.reviewSince && !conv.reviewOutcome) await settleReviewAlerts(conv.id);
   };
   try {
     faults.hit("intake.turn"); // test-only: a failure that is not the model's (the retry must still answer)
@@ -346,7 +535,7 @@ export async function runIntakeTurn(conversationId: string): Promise<{ status: s
       return { status: "submitted" };
     }
     if (unavailable || (conv.pendingAttempts ?? 0) + 1 >= MAX_TURN_ATTEMPTS) {
-      await finishConversation(unavailable ? OFFLINE_REPLY : SORRY_REPLY, "OPEN", unavailable ? "ai_unavailable" : "error");
+      await finishConversation(await failureReply(conv.id, unavailable), "OPEN", unavailable ? "ai_unavailable" : "error");
       return { status: "failed" };
     }
     throw e; // pg-boss retries once, and the retry takes this failed run over; the marker stays set, so the sweep recovers it too

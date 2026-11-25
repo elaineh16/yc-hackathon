@@ -289,7 +289,24 @@ export type CommandCenter = {
   recent: ActivityItem[];
   /** Relay AI suggestions waiting for a manager. */
   suggestions: (AiProposalView & { caseId: string; caseRef: string; caseTitle: string })[];
+  /** Chat reports the assistant did not finish, waiting for a manager to file or close (the intake safety net). */
+  unfinishedChats: UnfinishedChat[];
   generatedAt: string;
+};
+
+export type UnfinishedChat = {
+  id: string;
+  residentName: string;
+  unitLabel: string;
+  propertyName: string;
+  /** assistant_failed | unfinished */
+  reason: string;
+  reasonText: string;
+  since: string;
+  /** The resident's own words, verbatim (Relay's lines are not included). */
+  words: string;
+  /** The safety rules read the words as urgent or worse. */
+  urgent: boolean;
 };
 
 export type CaseFilters = {
