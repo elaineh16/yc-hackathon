@@ -33,7 +33,20 @@ The intake agent talks with the resident (chat) and files the report.
   the job; a run interrupted by a restart is taken over after 4 minutes; the minute sweep re-queues lost turns. The
   reply is written only while that turn is still pending, so a late run can never overwrite newer messages. Every
   turn ends with a reply: if the model is down, the resident is told plainly and offered the form, with their words
-  carried over; after a repeated failure they get an apology and the same choice.
+  carried over; after a repeated failure they get an apology and the same choice. A turn interrupted on every attempt
+  is given up rather than retried forever.
+- **Safety net, with no model in the path** (`agent/intakeSafety.ts`; details in
+  [engineering/01-intake-safety-net.md](engineering/01-intake-safety-net.md)):
+  - **Possible emergencies:** after each resident message, the server runs the filing rules on everything the
+    resident has written. If they see a possible emergency, the server files it at once from those words, escalates
+    it and gives the rules' safety advice, without waiting for the model.
+  - **Unfinished chats go to a person:**
+    - **When:** the assistant cannot reply, every attempt fails, or the resident stops for 30 minutes with nothing
+      filed.
+    - **Where:** the chat goes to the property's managers, with the resident's words, under "Unfinished chat
+      reports" in the command center. They file it as a case or close it with a reason.
+    - **What the resident sees:** a reply saying it was passed on, and a notification when a manager files it.
+  - **Through the form:** filing with "Use the form with my words" closes the chat it came from.
 - **Limits:** 60 chat messages per resident per hour, and 20 resident messages per conversation (each turn resends
   the conversation to the model).
 - **Tools:** building notes (staff-only blocks and sections never included, however they are marked), the resident's recent reports, `note_facts`,

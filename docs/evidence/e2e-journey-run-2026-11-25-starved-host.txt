@@ -1,0 +1,91 @@
+﻿# Browser journeys (Playwright, Chrome), 2026-11-25 16:05:42 EST
+# Run with one retry, as in CI: a test that needed it is reported as flaky, never hidden.
+$ cd app/e2e && npx playwright test journey --reporter=list --retries=1
+
+Running 18 tests using 1 worker
+
+ 
+  ok  1 tests\journey.spec.ts:24:1 › 1-2. the resident reports a leaking kitchen sink and it is saved (56.6s)
+  ok  2 tests\journey.spec.ts:62:1 › 3-4. the manager sees the real case and assigns an approved plumber (26.9s)
+  ok  3 tests\journey.spec.ts:86:1 › 5-6. the contractor receives it and responds with an estimate and availability (14.3s)
+  ok  4 tests\journey.spec.ts:107:1 › the resident chooses a time; it waits for the manager's approval (15.9s)
+  ok  5 tests\journey.spec.ts:117:1 › 7-8. the manager approves; the visit is confirmed because everyone agreed (13.7s)
+  ok  6 tests\journey.spec.ts:129:1 › 9. the resident sees the confirmed visit and the timeline (15.7s)
+  ok  7 tests\journey.spec.ts:135:1 › 10. the contractor does the work and reports it complete (14.3s)
+  ok  8 tests\journey.spec.ts:155:1 › 11-12. the resident verifies and the case is RESOLVED with its full history (27.7s)
+  x   9 tests\journeys.spec.ts:53:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation (5.7m)
+
+  x  10 tests\journeys.spec.ts:53:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation (retry #1) (5ms)
+'FORCE_COLOR' env being set.
+  ok 11 tests\journeys.spec.ts:125:3 › 2. a missing vendor: discovery, verification, onboarding, resume › no approved heating and cooling vendor: Relay finds local businesses and the manager onboards one (7.9s)
+  ok 12 tests\journeys.spec.ts:182:3 › 3. an ambiguous report: a person classifies it, then it routes › a vague report goes to a person, who sets the category; it then follows the trade's path (4.1s)
+  ok 13 tests\journeys.spec.ts:263:3 › 4. follow-up: completion is confirmed by the resident, and 'still having problems' reopens it › the contractor completes; the resident is asked in-app and by email; no reopens it for the manager (4.4s)
+  ok 14 tests\journeys.spec.ts:311:3 › 5. failures are visible and never block the work › a double-submitted report creates one case (2.0s)
+  ok 15 tests\journeys.spec.ts:329:3 › 5. failures are visible and never block the work › with the AI offline, the resident is told and the form works (617ms)
+  ok 16 tests\journeys.spec.ts:338:3 › 5. failures are visible and never block the work › the discovery provider is down: the failure is explained and a vendor can be added by hand (14.8s)
+  ok 17 tests\journeys.spec.ts:380:3 › 5. failures are visible and never block the work › email not configured: the manager is told notifications are in-app only (2.4s)
+  ok 18 tests\journeys.spec.ts:404:3 › 6. the chat safety net: nothing a resident writes is left with no one › a possible emergency typed into the chat is filed at once by the safety rules (2.4s)
+  ok 19 tests\journeys.spec.ts:417:3 › 6. the chat safety net: nothing a resident writes is left with no one › with the assistant offline, a manager reads the chat and files it from the command center (5.3s)
+
+
+  1) tests\journeys.spec.ts:53:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation 
+
+    Test timeout of 300000ms exceeded.
+
+    Test timeout of 300000ms exceeded.
+
+    Error Context: test-results\journeys-1-an-existing-ven-24670-sit-completion-confirmation\error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    "beforeAll" hook timeout of 300000ms exceeded.
+
+      32 | test.describe("1. an existing vendor: an appliance from report to RESOLVED", () => {
+      33 |   let resident: Page, manager: Page, contractor: Page, id = "";
+    > 34 |   test.beforeAll(async ({ browser }) => {
+         |        ^
+      35 |     await resetCases();
+      36 |     resident = await signIn(browser, "priya", PHONE);
+      37 |     manager = await signIn(browser, "morgan");
+        at C:\Users\s23ku\Projects\yc-hackathon\app\e2e\tests\journeys.spec.ts:34:8
+
+    Error: locator.fill: Test ended.
+    Call log:
+      - waiting for getByLabel('Username')
+
+
+       at helpers.ts:23
+
+      21 |     await page.reload();
+      22 |   }
+    > 23 |   await field.fill(username);
+         |               ^
+      24 |   await page.getByLabel("Password").fill(PASSWORD);
+      25 |   await page.getByRole("button", { name: "Sign in" }).click();
+      26 |   await expect(page).not.toHaveURL(/\/login/);
+        at signIn (C:\Users\s23ku\Projects\yc-hackathon\app\e2e\tests\helpers.ts:23:15)
+        at C:\Users\s23ku\Projects\yc-hackathon\app\e2e\tests\journeys.spec.ts:36:16
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\journeys-1-an-existing-ven-24670-sit-completion-confirmation-retry1\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\journeys-1-an-existing-ven-24670-sit-completion-confirmation-retry1\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\journeys-1-an-existing-ven-24670-sit-completion-confirmation-retry1\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    tests\journeys.spec.ts:53:3 › 1. an existing vendor: an appliance from report to RESOLVED › report, offer, accept within the threshold, visit, completion, confirmation 
+  17 passed (30.4m)
+
+
+# Why journey 1 failed here (checked during and right after the run, 2026-11-25 ~16:30 EST)
+# The Windows host was out of memory: about 0.01 GB free, 188 MB available, 58.8 of 63.4 GB committed, about 28,500
+# pages per second. Steps that take 1-3 s took 14-56 s. Journey 1's first attempt hit the 5-minute test timeout; on
+# the retry the login page never rendered within the 5-minute beforeAll timeout ("waiting for getByLabel('Username')").
+# Journey 1 does not touch chat code. The same suite passed 18/18 in 2.7 minutes about 25 minutes earlier, on the code
+# before one reordering inside flagForReview (looking up the unit before setting the review flag).

@@ -1,0 +1,54 @@
+# Agents on the real model (qwen2.5:3b via Ollama, CPU), 2026-11-25 15:43:32 EST
+$ npx tsx --test --test-concurrency=1 tests/api/agent.test.ts
+▶ intake agent
+  ✖ converses in natural language, then files the case only through the server (894369.81406ms)
+  ℹ relay: I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which wor
+  ℹ relay: I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which wor
+  ℹ relay: I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which wor
+  ℹ relay: I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which wor
+  ℹ relay: I've noted that the kitchen sink is leaking now. What is still unknown, Priya? Do you need to know anything else before I submit this report?
+✖ intake agent (894957.346204ms)
+▶ coordinator
+  ﹣ wakes on the new case, reads it through tools, and every proposal passes policy (11.522378ms) # no case from the intake test
+✔ coordinator (25.121ms)
+ℹ tests 2
+ℹ suites 2
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 896543.9427
+✖ failing tests:
+test at tests/api/agent.test.ts:24:3
+✖ converses in natural language, then files the case only through the server (894369.81406ms)
+  AssertionError [ERR_ASSERTION]: the agent filed the report within five resident turns
+  + actual - expected
+  + 'OPEN'
+  - 'SUBMITTED'
+      at TestContext.<anonymous> (/home/s23kumar/relay-v1/unit/tests/api/agent.test.ts:51:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1905:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'OPEN',
+    expected: 'SUBMITTED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+# Why this run is not a valid measurement (checked right after it, 2026-11-25 ~16:00 EST)
+# The intake runs it produced, from the database (AgentRun, kind INTAKE):
+#   turn 1-4: FAILED "timed out" after 180.6-181.3 s with 0 model steps completed (the first model call never returned)
+#   turn 5:   SUCCEEDED after 153.1 s with 1 step
+# Raw model speed at the same time (Ollama /api/generate, 45-token prompt, 40 tokens out):
+#   prompt evaluation 4.1 tokens/s, generation 5.0 tokens/s, 20.6 s total
+# Host: Windows had about 0.5 GB of 15.4 GB physical memory free; the WSL VM's working set was 531 MB while Linux
+# inside it used about 4.2 GB, so the host was paging the VM (and the 2 GB model) out. On AC power, Balanced plan.
+# The V1.1 run of the same test (agent-tests-run.txt, 2026-11-23) passed 2/2, with the intake test taking 159 s.
+# The code under test does not change the model call or the prompt; the safety screen did not fire on any of the
+# test's messages (checked separately). Every timed-out turn took the new failure path: the resident was told the
+# chat was passed to the property manager. Re-run pending on an unloaded host.

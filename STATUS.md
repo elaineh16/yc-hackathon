@@ -1,20 +1,23 @@
-# Relay V1.1 status
+# Relay status
 
-As of 2026-11-23, branch `relay-v1`. Everything marked as passing was run against the running application. The logs
-are in [docs/evidence/](docs/evidence/).
+As of 2026-11-25, branch `relay-v1`: V1.1 plus the first V1.2 improvement, the chat safety net. The V1.2 audit and
+the evidence for each improvement are in [docs/engineering/](docs/engineering/). Everything marked as passing was run
+against the running application. The logs are in [docs/evidence/](docs/evidence/).
 
 ## Results
 
 | Suite | Command (from `app/` unless noted) | Result | Log |
 | --- | --- | --- | --- |
 | Type-check | `npx tsc --noEmit -p tsconfig.json` | **clean** | |
-| Unit | `npx tsx --test tests/unit/*.test.ts` | **35 / 35 pass** | [unit-tests-run.txt](docs/evidence/unit-tests-run.txt) |
-| API: workflow, reliability, discovery, follow-ups, V1.1 rules, security review | `npx tsx --test --test-concurrency=1 tests/api/{workflow,reliability,discovery,followups,v11,audit}.test.ts` | **86 / 86 pass** | [api-tests-run.txt](docs/evidence/api-tests-run.txt) |
-| Browser journeys (Playwright, Chrome) | `cd app/e2e && npx playwright test journey --retries=1` | **16 / 16 pass** (2.6 min; none needed the retry) | [e2e-journey-run.txt](docs/evidence/e2e-journey-run.txt) |
-| Agents on the real model | `npx tsx --test --test-concurrency=1 tests/api/agent.test.ts` | **2 / 2 pass** on `qwen2.5:3b` (CPU): the intake agent converses and files through the server (159 s); the coordinator wakes on the case, uses its tools, and every proposal passes policy (56 s) | [agent-tests-run.txt](docs/evidence/agent-tests-run.txt) |
+| Unit | `npx tsx --test tests/unit/*.test.ts` | **40 / 40 pass** | [unit-tests-run.txt](docs/evidence/unit-tests-run.txt) |
+| API: workflow, reliability, discovery, follow-ups, V1.1 rules, security review, chat safety net | `npx tsx --test --test-concurrency=1 tests/api/{workflow,reliability,discovery,followups,v11,audit,intake-safety}.test.ts` | **97 / 97 pass** | [api-tests-run.txt](docs/evidence/api-tests-run.txt) |
+| Browser journeys (Playwright, Chrome) | `cd app/e2e && npx playwright test journey --retries=1` | **18 / 18 pass** (2.7 min; none needed the retry) | [e2e-journey-run.txt](docs/evidence/e2e-journey-run.txt) |
+| Agents on the real model | `npx tsx --test --test-concurrency=1 tests/api/agent.test.ts` | **2 / 2 pass** on `qwen2.5:3b` (CPU), 2026-11-23 (V1.1): the intake agent converses and files through the server (159 s); the coordinator wakes on the case, uses its tools, and every proposal passes policy (56 s). **Re-run after the chat safety net (2026-11-25): not valid.** The host was starved for memory, the model evaluated prompts at 4.1 tokens/s, and every intake turn hit the 180 s deadline, so the intake test failed and the coordinator test was skipped. Re-run pending | [V1.1 log](docs/evidence/agent-tests-run.txt), [2026-11-25 attempt and diagnosis](docs/evidence/agent-tests-run-2026-11-25-starved-host.txt) |
 | Demo videos | `app/e2e/demo` (see [docs/demo/DEMO_RUNBOOK.md](docs/demo/DEMO_RUNBOOK.md)) | **Product demo** "Relay: from request to resolution": 5:26, 98% real app footage, live Fiber search, reviewed frame by frame while playing; narration onsets within 0.04 s of the timeline. **Technical walkthrough**: 4:49, audio and captions within 0.1 s | [docs/demo/](docs/demo/) |
 | AI evaluation, deterministic, with the safety gate | `npx tsx tests/eval/deterministic.ts --gate` | **gate passes** | [eval-deterministic.json](docs/evidence/eval-deterministic.json) |
 | AI evaluation, live model | `tests/eval/live.ts`, `tests/eval/live-coordinator.ts` | see [docs/ai-eval.md](docs/ai-eval.md) | [eval-summary.json](docs/evidence/eval-summary.json) |
+| Chat safety net: does a chat report reach a person when the assistant fails? | `npx tsx tests/eval/intake-failures.ts after` (no model) | **8 / 8** scenarios reach a person (before the change: **0 / 8**); possible emergencies filed in 14–17 ms | [after](docs/evidence/intake-failures-after.json), [before](docs/evidence/intake-failures-before.json) |
+| Safety screen on chat words, every dataset | `npx tsx tests/eval/safety-screen.ts` | Emergencies filed during the chat: 23/23 tuned, 13/13 held-out v1, **7/13 held-out v2**; non-emergencies wrongly filed: 0/76, 1/17, 1/17 | [safety-screen.json](docs/evidence/safety-screen.json) |
 | GitHub Actions (`.github/workflows/ci.yml`) | type-check, unit, deterministic eval gate, every API suite, browser journeys, on Postgres and Mailpit with no model | **green** on `1f05b5c` ([push run 45280813408](https://github.com/elaineh16/yc-hackathon/actions/runs/45280813408), [PR run 45280829386](https://github.com/elaineh16/yc-hackathon/actions/runs/45280829386)) | |
 | Screenshots, desktop, tablet and phone | `SCREENS=1 npx playwright test screens` | 28 | [docs/screenshots/v1.1/](docs/screenshots/v1.1/) |
 
@@ -85,6 +88,12 @@ No email was sent outside this machine.
     that of a small model.
   - An intake turn takes about 10 to 40 s, and a coordinator review 30 to 90 s. A larger model is a configuration
     change (`LLM_BASE_URL`, `LLM_MODEL`).
+- **Chat safety net** ([details](docs/engineering/01-intake-safety-net.md#what-it-does-not-do-and-what-is-left)):
+  - It adds no detection beyond the rules: the held-out v2 emergencies the rules miss still depend on the model.
+  - A chat the rules cannot read, and that the resident stops answering, reaches a manager after 30 minutes.
+  - "Start over" sends nothing to review.
+- **Reminders across reopen cycles:** three notification keys are per case, not per round. A second round's
+  verification and approval reminders are skipped ([V12_BASELINE.md](docs/engineering/V12_BASELINE.md), improvement 4).
 - **Safety rules out of sample:** held-out v2 is the honest estimate (see [docs/ai-eval.md](docs/ai-eval.md)). The
   rules are one layer: the model's own reading also escalates, and every case a rule cannot place goes to a person.
 - **Email:** only Mailpit was used. A real SMTP server reports "accepted", which Relay never shows as delivered.

@@ -1,59 +1,68 @@
-# unit tests, 2026-11-23 17:07:39 EST
+# unit tests, 2026-11-25 16:02:22 EST
 $ npx tsx --test tests/unit/*.test.ts
 ▶ staff-only building notes
-  ✔ a marked line is hidden, the rest of its paragraph is not (1.596026ms)
-  ✔ markers written as bullets, quotes, numbered items or in bold are recognised (0.360918ms)
-  ✔ continuation lines of a staff block stay hidden until the next blank line (0.929417ms)
-  ✔ a staff-only heading hides its whole section, up to the next heading (0.202207ms)
-  ✔ ordinary notes are untouched (0.146773ms)
-✔ staff-only building notes (4.07422ms)
+  ✔ a marked line is hidden, the rest of its paragraph is not (10.160134ms)
+  ✔ markers written as bullets, quotes, numbered items or in bold are recognised (1.536456ms)
+  ✔ continuation lines of a staff block stay hidden until the next blank line (0.645746ms)
+  ✔ a staff-only heading hides its whole section, up to the next heading (0.922573ms)
+  ✔ ordinary notes are untouched (0.770992ms)
+✔ staff-only building notes (21.388088ms)
 ▶ the reply guard
-  ✔ a secret is withheld however it is written (0.724961ms)
-  ✔ anything that reads as a code is withheld even when it is not a known secret (0.238846ms)
-  ✔ ordinary numbers are left alone (0.183286ms)
-✔ the reply guard (1.348105ms)
+  ✔ a secret is withheld however it is written (7.05175ms)
+  ✔ anything that reads as a code is withheld even when it is not a known secret (2.923397ms)
+  ✔ ordinary numbers are left alone (0.601941ms)
+✔ the reply guard (11.622992ms)
 ▶ state machine
-  ✔ every status except the closed ones has an owner and a next action (0.687352ms)
-  ✔ the main path is reachable in order (0.231096ms)
-  ✔ a contractor can complete work but never resolve a case (1.107143ms)
-  ✔ the AI coordinator's powers are limited (0.593799ms)
-  ✔ work cannot be scheduled while an approval is pending, and closed cases stay closed (0.263238ms)
-  ✔ two-target actions require an explicit target from the allowed set (0.146494ms)
-✔ state machine (4.015297ms)
+  ✔ every status except the closed ones has an owner and a next action (5.267863ms)
+  ✔ the main path is reachable in order (1.252701ms)
+  ✔ a contractor can complete work but never resolve a case (2.347196ms)
+  ✔ the AI coordinator's powers are limited (4.516345ms)
+  ✔ work cannot be scheduled while an approval is pending, and closed cases stay closed (1.304427ms)
+  ✔ two-target actions require an explicit target from the allowed set (1.750101ms)
+✔ state machine (25.402716ms)
 ▶ triage safety rules
-  ✔ hazards in the resident's words escalate (9.956879ms)
-  ✔ a chirping smoke detector is not a fire; a sounding alarm is (0.335773ms)
-  ✔ negated mentions are not hazards (0.507044ms)
-  ✔ a yes to a safety question escalates; an unsure answer goes to a person (0.497323ms)
-  ✔ categories from wording, and unknown problems go to a person (0.508557ms)
-  ✔ V1.1 categories from wording (0.764924ms)
-  ✔ a person smoking next door is not a fire; a smoking outlet is (0.308756ms)
-  ✔ a chirping CO detector needs a battery; a sounding CO alarm is an emergency (0.275756ms)
-  ✔ water reaching electrics escalates; water kept away from them does not (2.485203ms)
-  ✔ a resident's 'something else' is kept and goes to a person, with what the wording suggests (0.163086ms)
-  ✔ lockouts and elevators (1.349549ms)
-  ✔ sounds of violence escalate with advice to call 911 (0.245598ms)
-  ✔ no heat with someone at risk is an emergency (0.137372ms)
-  ✔ hazards in everyday wording escalate (0.793434ms)
-  ✔ alarming words that are not emergencies do not escalate (0.611919ms)
-✔ triage safety rules (19.444617ms)
+  ✔ hazards in the resident's words escalate (54.120201ms)
+  ✔ a chirping smoke detector is not a fire; a sounding alarm is (5.984616ms)
+  ✔ negated mentions are not hazards (1.822982ms)
+  ✔ a yes to a safety question escalates; an unsure answer goes to a person (2.331164ms)
+  ✔ categories from wording, and unknown problems go to a person (2.024938ms)
+  ✔ V1.1 categories from wording (3.023063ms)
+  ✔ a person smoking next door is not a fire; a smoking outlet is (5.920134ms)
+  ✔ a chirping CO detector needs a battery; a sounding CO alarm is an emergency (1.824297ms)
+  ✔ water reaching electrics escalates; water kept away from them does not (6.405522ms)
+  ✔ a resident's 'something else' is kept and goes to a person, with what the wording suggests (0.994859ms)
+  ✔ lockouts and elevators (11.212811ms)
+  ✔ sounds of violence escalate with advice to call 911 (1.371681ms)
+  ✔ no heat with someone at risk is an emergency (0.590102ms)
+  ✔ hazards in everyday wording escalate (3.603735ms)
+  ✔ alarming words that are not emergencies do not escalate (2.163528ms)
+✔ triage safety rules (107.959625ms)
 ▶ intake validation
-  ✔ keeps only the category's answers, in canonical types (0.398286ms)
-  ✔ reports missing and invalid answers (0.168371ms)
-  ✔ text answers of 'none' are treated as no answer (0.14344ms)
-✔ intake validation (0.820984ms)
+  ✔ keeps only the category's answers, in canonical types (1.387675ms)
+  ✔ reports missing and invalid answers (0.489616ms)
+  ✔ text answers of 'none' are treated as no answer (0.392745ms)
+✔ intake validation (2.819398ms)
 ▶ spending and scheduling rules
-  ✔ fixed estimates at or under the threshold are approved by policy; inspection-first never is (0.09241ms)
-  ✔ overlap is half-open: back-to-back visits do not clash (0.143735ms)
-✔ spending and scheduling rules (0.301675ms)
+  ✔ fixed estimates at or under the threshold are approved by policy; inspection-first never is (0.320365ms)
+  ✔ overlap is half-open: back-to-back visits do not clash (0.968531ms)
+✔ spending and scheduling rules (1.520101ms)
 ▶ case titles
-  ✔ an answer of 'other' never makes a title like 'Leak at the somewhere else': the resident's words name it (0.297069ms)
-✔ case titles (0.354927ms)
-ℹ tests 35
-ℹ suites 7
-ℹ pass 35
+  ✔ an answer of 'other' never makes a title like 'Leak at the somewhere else': the resident's words name it (5.085306ms)
+✔ case titles (6.100213ms)
+▶ the safety screen reads residents' chat words with the filing rules
+  ✔ possible emergencies are caught from a chat message (53.621432ms)
+  ✔ ordinary problems, and hazards the resident rules out, are not (2.473052ms)
+  ✔ only the resident's own lines are screened and forwarded, never Relay's (0.821227ms)
+✔ the safety screen reads residents' chat words with the filing rules (61.692678ms)
+▶ an unfinished conversation goes to a person once it is idle
+  ✔ after the idle time, with something the resident said (1.047296ms)
+  ✔ not when filed, already in review, waiting for a reply, or empty (0.513622ms)
+✔ an unfinished conversation goes to a person once it is idle (2.152098ms)
+ℹ tests 40
+ℹ suites 9
+ℹ pass 40
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 165.93891
+ℹ duration_ms 576.195201

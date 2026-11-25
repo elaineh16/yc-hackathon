@@ -48,9 +48,15 @@ Nothing in Relay reports an email as delivered to a person.
 | E | Repair complete: "Yes, resolved" / "No, still having problems" | resident | in-app + email | "No" reopens the case for the manager, who is told; the coordinator wakes (`NOT_FIXED`) |
 | F | No answer | resident, then manager | in-app + email | verification reminders stop at `maxReminders`; the manager is told once that they may close it as unverified; nothing is resolved automatically |
 | G | Relay cannot proceed: the model is offline, no approved vendor and discovery off or failed, a search not run | managers | in-app (+ email) | once per trigger |
+| H | A chat report the assistant did not finish: it could not reply, every attempt failed, or the resident stopped for 30 minutes with nothing filed (a possible emergency is filed at once instead, as a case) | the property's managers, with the resident's words; the resident, when a manager files it | in-app + email | once per review. Filing or closing it acknowledges every manager's alert. A new message after a close starts a new review |
 
-Approval reminders are daily, at most three. Every reminder's dedupe key carries its number and the state-entry
-timestamp, so the sweep can run every minute, twice, or on two servers, and nothing repeats or loops.
+Approval reminders are daily, at most three. Each reminder's dedupe key is unique to that reminder, so the sweep can
+run every minute, twice, or on two servers, and nothing repeats or loops.
+
+**Known gap:** three keys are per case, not per round of the case: verification reminders (`verify-reminder:n`), the
+verification-overdue notice and approval reminders (`approval-reminder:day`). After "not fixed" and a second repair, or a
+second approval, those reminders are skipped while the history still records "Reminder n of m sent". See
+[V12_BASELINE.md](engineering/V12_BASELINE.md#4-backend-failure-classes); it is improvement 4 there.
 
 **Acknowledgement.** Acting on a case (accepting the offer, choosing a time, deciding an approval) acknowledges the
 actor's open notifications for it. "Got it" in the notification menu acknowledges one explicitly. Overdue

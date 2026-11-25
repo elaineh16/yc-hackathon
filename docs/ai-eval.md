@@ -83,6 +83,10 @@ code as it was: its rules, prompts and policy are extracted verbatim from git in
   rules were tuned by looking at failures in those sets. Held-out v1's first scoring and held-out v2 are the
   out-of-sample estimates.
 - The live subset is small (34 + 14), the model runs at temperature 0.2, and runs can vary.
+- **No live V1 → V1.1 difference below is statistically significant** at these sample sizes (two-sided Fisher exact
+  test: false escalation p = 0.19, missed escalation 0.58, route 0.80, category 0.29, invented facts 0.20). "Better"
+  and "worse" below describe the point estimates only. The V1.2 audit,
+  [engineering/V12_BASELINE.md](engineering/V12_BASELINE.md), lists what the live harness does not measure.
 - The pattern checks for prohibited behaviour and invented facts are heuristics. They can miss things, and a few
   false flags remain. Diagnosing the cause is not measured.
 - Both versions run on the same 3B model on CPU. A larger model would score differently; the policy layer does not
