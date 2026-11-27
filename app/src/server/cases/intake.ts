@@ -59,13 +59,14 @@ function resultMessage(r: Pick<IntakeResult, "ref" | "emergency" | "needsReview"
   return `Your report is saved as ${r.ref}. ${r.managersNotified > 0 ? "The property manager has been notified and Relay is lining up a vendor." : told} You can follow progress on this page.`;
 }
 
-/** A chat report filed without the assistant (see IntakeInput.filedBy): the rules read the resident's words. */
-function classifyFromChat(description: string, by: NonNullable<IntakeInput["filedBy"]>): Classification {
+/** A chat or call report filed without the assistant (see IntakeInput.filedBy): the rules read the resident's words. */
+function classifyFromChat(description: string, by: NonNullable<IntakeInput["filedBy"]>, channel: IntakeChannel): Classification {
   const t = triage({ description });
+  const from = channel === "VOICE" ? "voice call" : "chat";
   const why =
     by.kind === "SAFETY_NET"
-      ? "Filed from the chat by Relay's safety rules, before the assistant had filed it: the resident's words describe a possible emergency."
-      : `Filed by ${by.name} from a chat the assistant did not finish.`;
+      ? `Filed from the ${from} by Relay's safety rules, before the assistant had filed it: the resident's words describe a possible emergency.`
+      : `Filed by ${by.name} from a ${from} the assistant did not finish.`;
   return { ...t, reasons: [why, ...t.reasons], details: {}, source: "RULES", observations: [], assumptions: [], openQuestions: [] };
 }
 
@@ -104,7 +105,7 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
     const residency = await prisma.residency.findFirst({ where: { userId: residentId, unitId: raw.unitId, active: true }, include: { unit: true } });
     if (!residency) throw new HttpError(403, "You can only report issues for a unit you live in.");
 
-    const t = raw.filedBy ? classifyFromChat(description, raw.filedBy) : channel === "TEXT" ? classifyForm(description, raw) : classifyAgent(description, raw.agent!, channel);
+    const t = raw.filedBy ? classifyFromChat(description, raw.filedBy, channel) : channel === "TEXT" ? classifyForm(description, raw) : classifyAgent(description, raw.agent!, channel);
 
     try {
       return await prisma.$transaction(async (tx) => {
@@ -138,11 +139,12 @@ export async function createCase(actor: ActorCtx, raw: IntakeInput): Promise<Int
           include: CASE_INCLUDE,
         });
         const ref = caseRef(created.number);
+        const talk = channel === "VOICE" ? "voice call with Relay's assistant" : "chat with Relay's assistant";
         const via =
           raw.filedBy?.kind === "SAFETY_NET"
-            ? "chat with Relay's assistant, filed by the safety rules"
+            ? `${talk}, filed by the safety rules`
             : raw.filedBy?.kind === "MANAGER"
-              ? `chat with Relay's assistant, filed by ${raw.filedBy.name} after the assistant did not finish`
+              ? `${talk}, filed by ${raw.filedBy.name} after the assistant did not finish`
               : channel === "VOICE"
                 ? "voice assistant"
                 : channel === "CHAT"

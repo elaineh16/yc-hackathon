@@ -289,17 +289,19 @@ export type CommandCenter = {
   recent: ActivityItem[];
   /** Relay AI suggestions waiting for a manager. */
   suggestions: (AiProposalView & { caseId: string; caseRef: string; caseTitle: string })[];
-  /** Chat reports the assistant did not finish, waiting for a manager to file or close (the intake safety net). */
+  /** Chat and call reports the assistant did not finish, waiting for a manager to file or close (the intake safety net). */
   unfinishedChats: UnfinishedChat[];
   generatedAt: string;
 };
 
 export type UnfinishedChat = {
   id: string;
+  /** CHAT (typed) or VOICE (a call; the words are its transcript). */
+  channel: "CHAT" | "VOICE";
   residentName: string;
   unitLabel: string;
   propertyName: string;
-  /** assistant_failed | unfinished */
+  /** assistant_failed | unfinished | call_ended */
   reason: string;
   reasonText: string;
   since: string;

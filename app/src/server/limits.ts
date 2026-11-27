@@ -11,6 +11,8 @@ export const LIMITS = {
   reports: () => ({ max: num(process.env.LIMIT_REPORTS_PER_HOUR, 20), windowMs: 3600_000, what: "You have sent a lot of reports in the last hour." }),
   chat: () => ({ max: num(process.env.LIMIT_CHAT_MESSAGES_PER_HOUR, 60), windowMs: 3600_000, what: "You have sent a lot of messages to Relay's assistant in the last hour." }),
   voice: () => ({ max: num(process.env.LIMIT_VOICE_SESSIONS_PER_HOUR, 10), windowMs: 3600_000, what: "You have started a lot of voice reports in the last hour." }),
+  // Lines of voice-call transcripts: at most 160 per call, so this allows several full calls an hour.
+  voiceEvents: () => ({ max: num(process.env.LIMIT_VOICE_EVENTS_PER_HOUR, 600), windowMs: 3600_000, what: "Relay has recorded a lot of voice-call lines from you in the last hour." }),
 };
 
 /** Counts one use of `kind` by this user, or refuses (429) when the window is full. */

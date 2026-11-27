@@ -87,7 +87,8 @@ action acknowledgeNotification { fn: import { acknowledgeNotification } from "@s
 action updateMyNotifications { fn: import { updateMyNotifications } from "@src/server/ops", entities: [User] }
 action reportIssue { fn: import { reportIssue } from "@src/server/ops", entities: [Case, CaseEvent, Notification, IntakeConversation] }
 action sendIntakeMessage { fn: import { sendIntakeMessage } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
-action submitVoiceReport { fn: import { submitVoiceReport } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action submitVoiceReport { fn: import { submitVoiceReport } from "@src/server/ops", entities: [Case, CaseEvent, Notification, IntakeConversation] }
+action recordVoiceEvent { fn: import { recordVoiceEvent } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
 action startVoiceIntake { fn: import { startVoiceIntake } from "@src/server/ops", entities: [] }
 action chooseVisitTime { fn: import { chooseVisitTime } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, VendorAssignment, Notification] }
 action declineVisitTimes { fn: import { declineVisitTimes } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }

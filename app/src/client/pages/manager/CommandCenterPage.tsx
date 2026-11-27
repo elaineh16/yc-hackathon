@@ -297,12 +297,12 @@ export function CaseRows({ items, compact }: { items: CaseListItem[]; compact?: 
 
 export const AiBadge = () => <Provenance kind="ai-action" label="AI" />;
 
-/** The intake safety net: chats the assistant did not finish. A person files each one as a case, or closes it. */
+/** The intake safety net: chats and calls the assistant did not finish. A person files each one as a case, or closes it. */
 function UnfinishedChats({ items }: { items: UnfinishedChat[] }) {
   return (
     <Panel className="border-[#f3d19c]" data-testid="unfinished-chats">
-      <PanelHeader title={<span className="flex items-center gap-2"><MessageSquareWarning className="size-4 text-warn" /> Unfinished chat reports</span>}>
-        Residents wrote to Relay's assistant, but it could not finish and nothing was filed. Read what they said, then file it or close it.
+      <PanelHeader title={<span className="flex items-center gap-2"><MessageSquareWarning className="size-4 text-warn" /> Unfinished reports</span>}>
+        Residents told Relay's assistant about a problem, by chat or on a call, but nothing was filed. Read what they said, then file it or close it.
       </PanelHeader>
       <ul className="divide-y divide-line">
         {items.map((c) => (
@@ -327,6 +327,7 @@ function UnfinishedRow({ c }: { c: UnfinishedChat }) {
         <span className="text-muted">
           {c.propertyName}, unit {c.unitLabel}
         </span>
+        <Badge tone="outline">{c.channel === "VOICE" ? "Voice call" : "Chat"}</Badge>
         {c.urgent && <Badge tone="danger">Urgent by the safety rules</Badge>}
         <Badge tone="outline">{c.reasonText}</Badge>
         <span className="ml-auto text-xs text-faint">{when(c.since)}</span>

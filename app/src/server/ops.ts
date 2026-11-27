@@ -7,7 +7,7 @@ import type { Category, Severity } from "../shared/domain";
 import type { AiStatus, CaseFilters, Me } from "../shared/views";
 import { actorOf, type Ctx, requireRole } from "./access";
 import { decideProposal as decideProposalFn, kickCoordinator, requestReassessment as requestReassessmentFn } from "./agent/coordinator";
-import { closeChatFiledByForm, closeUnfinishedChat as closeUnfinishedChatFn, fileUnfinishedChat as fileUnfinishedChatFn, getConversation, sendIntakeMessage as sendIntakeMessageFn, submitVoiceReport as submitVoiceReportFn } from "./agent/intake";
+import { closeChatFiledByForm, closeUnfinishedChat as closeUnfinishedChatFn, fileUnfinishedChat as fileUnfinishedChatFn, getConversation, recordVoiceEvent as recordVoiceEventFn, sendIntakeMessage as sendIntakeMessageFn, submitVoiceReport as submitVoiceReportFn } from "./agent/intake";
 import { llmStatus } from "./agent/llm";
 import * as flow from "./cases/flow";
 import { createCase, type IntakeInput } from "./cases/intake";
@@ -97,6 +97,15 @@ export const submitVoiceReport = async (args: Record<string, unknown>, ctx: Ctx)
   const a = requireRole(ctx, "RESIDENT");
   useLimit("reports", a.userId);
   return write(submitVoiceReportFn(a, args));
+};
+/**
+ * The resident's browser forwards each event of a voice call (connected, a line of the transcript, ended), so what the
+ * resident said is kept and screened by the safety net even if the call drops before the agent files anything.
+ */
+export const recordVoiceEvent = async (args: { unitId: string; attemptId: string; kind: string; text?: string; callId?: string }, ctx: Ctx) => {
+  const a = requireRole(ctx, "RESIDENT");
+  useLimit("voiceEvents", a.userId);
+  return recordVoiceEventFn(a, args); // a filing here does its own after-commit work (coordinator, email)
 };
 /** Each call opens a billable voice session, so it is limited per resident. */
 export const startVoiceIntake = async (args: { unitId?: string } | void, ctx: Ctx) => {

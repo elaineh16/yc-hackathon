@@ -8,7 +8,7 @@ import { prisma } from "wasp/server";
 import { caseRef } from "../../shared/domain";
 import { kickCoordinator } from "../agent/coordinator";
 import { flagForReview, kickIntake } from "../agent/intake";
-import { idleMinutes, idleReviewDue } from "../agent/intakeSafety";
+import { idleMinutes, idleReviewDue, voiceIdleMinutes } from "../agent/intakeSafety";
 import { deliverNow, type DeliveryResult } from "../notify/email";
 import { mark } from "../tracing";
 import { kickDiscovery } from "../vendors/discovery";
@@ -30,7 +30,7 @@ export type SweepResult = {
   discoveriesResumed: number;
   discoveriesFailed: number;
   intakeTurnsRequeued: number;
-  /** Unfinished chats put in front of a person (the resident stopped replying before anything was filed). */
+  /** Unfinished chats and calls put in front of a person (the resident stopped, or the call was cut off, before anything was filed). */
   intakeReviews: number;
   email: DeliveryResult | null;
 };
@@ -246,17 +246,27 @@ export async function sweepDeadlines(now: Date = new Date(), o: { deliverEmail?:
   for (const t of turns) await kickIntake(t.id);
   result.intakeTurnsRequeued = turns.length;
 
-  // 10b. The chat safety net: a conversation the resident left before anything was filed goes to the property's
-  // managers. One with nothing the resident said is closed instead, so it never blocks this query.
+  // 10b. The intake safety net: a chat the resident left, or a call that went silent without ending (a closed tab, a
+  // crash), before anything was filed goes to the property's managers. One with nothing the resident said is closed
+  // instead, so it never blocks this query. A call goes quiet for far less time than a chat before it counts.
   const idle = await prisma.intakeConversation.findMany({
-    where: { status: "OPEN", caseId: null, reviewSince: null, pendingSince: null, updatedAt: { lt: new Date(now.getTime() - idleMinutes() * 60_000) } },
-    select: { id: true, status: true, caseId: true, reviewSince: true, pendingSince: true, updatedAt: true, messages: true },
+    where: {
+      status: "OPEN",
+      caseId: null,
+      reviewSince: null,
+      pendingSince: null,
+      OR: [
+        { channel: "CHAT", updatedAt: { lt: new Date(now.getTime() - idleMinutes() * 60_000) } },
+        { channel: "VOICE", updatedAt: { lt: new Date(now.getTime() - voiceIdleMinutes() * 60_000) } },
+      ],
+    },
+    select: { id: true, channel: true, status: true, caseId: true, reviewSince: true, pendingSince: true, updatedAt: true, messages: true },
     orderBy: { updatedAt: "asc" },
     take: 25,
   });
   for (const c of idle) {
     if (idleReviewDue(c, now)) {
-      if (await flagForReview(c.id, "unfinished").catch(() => false)) result.intakeReviews++;
+      if (await flagForReview(c.id, c.channel === "VOICE" ? "call_ended" : "unfinished").catch(() => false)) result.intakeReviews++;
     } else await prisma.intakeConversation.updateMany({ where: { id: c.id, status: "OPEN", caseId: null, pendingSince: null, updatedAt: c.updatedAt }, data: { status: "ABANDONED" } });
   }
 

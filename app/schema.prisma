@@ -424,7 +424,11 @@ enum ConversationStatus {
   ABANDONED
 }
 
-// A resident's conversation with the intake agent. Persisted, so it survives reloads and server restarts.
+// A resident's conversation with an intake agent. Persisted, so it survives reloads and server restarts.
+//   CHAT  - typed, with Relay's own intake agent (the server runs every turn).
+//   VOICE - a call with the ElevenLabs voice agent. The call runs between the browser and ElevenLabs; the browser
+//           forwards each line of the transcript as it happens, so what the resident said is kept even if the call
+//           drops before the agent files anything.
 model IntakeConversation {
   id              String             @id @default(uuid())
   createdAt       DateTime           @default(now())
@@ -432,12 +436,16 @@ model IntakeConversation {
   residentId      Int
   resident        User               @relation(fields: [residentId], references: [id], onDelete: Cascade)
   unitId          String
+  channel         IntakeChannel      @default(CHAT)
+  // The voice provider's id for the call (VOICE only), to find its recording and transcript there.
+  externalId      String?
   status          ConversationStatus @default(OPEN)
   // [{ role: "resident" | "relay", text, at }]: what both sides actually said.
   messages        Json               @default("[]")
   // What the agent has learned so far, as structured facts it recorded with the note_facts tool.
   facts           Json               @default("{}")
-  // Idempotency key for the submission, so a retried submit returns the same case.
+  // Idempotency key for the submission, so a retried submit returns the same case. For a call, the browser's id for
+  // the call attempt, which its submit_report also sends: whoever files first, there is one case.
   clientRequestId String             @default(uuid())
   caseId          String?            @unique
   case            Case?              @relation(fields: [caseId], references: [id], onDelete: SetNull)
@@ -456,6 +464,7 @@ model IntakeConversation {
   reviewOutcome   String?
   reviewNote      String?
 
+  @@unique([residentId, clientRequestId])
   @@index([residentId, status])
   @@index([pendingSince])
   @@index([reviewSince, reviewOutcome])

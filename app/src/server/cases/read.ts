@@ -7,7 +7,7 @@ import { type Actor, caseRef, type CaseStatus, CASE_STATUSES, CATEGORIES, type C
 import { type Details, optionLabel, QUESTIONS } from "../../shared/intake";
 import { canPerform } from "../../shared/machine";
 import type { ActivityItem, AgentRunView, AiProposalView, AssignmentView, CaseAbilities, CaseAi, CaseDetail, CaseFilters, CaseListItem, CasePage, CommandCenter, EventView, FollowUpView, Inbox, JobBoard, JobItem, QueueItem, SlotView, UnfinishedChat, VendorOption } from "../../shared/views";
-import { REVIEW_REASONS, residentWordsOf, safetyScreen } from "../agent/intakeSafety";
+import { REVIEW_REASONS, residentWordsOf, safetyScreen, type ReviewReason } from "../agent/intakeSafety";
 import { assertCaseAccess, managedPropertyIds, visibleCasesWhere } from "../access";
 import { approvedVendorsFor } from "../vendors/directory";
 import { discoveryQueue } from "../vendors/discovery";
@@ -368,7 +368,7 @@ function whyHuman(c: ListRow, now: Date): string {
   return c.nextAction;
 }
 
-/** Chat reports waiting for a manager because the assistant did not finish them (agent/intakeSafety.ts). */
+/** Chat and call reports waiting for a manager because the assistant did not finish them (agent/intakeSafety.ts). */
 async function unfinishedChats(propertyIds: string[]): Promise<UnfinishedChat[]> {
   const units = await prisma.unit.findMany({ where: { propertyId: { in: propertyIds } }, select: { id: true, label: true, property: { select: { name: true } } } });
   if (!units.length) return [];
@@ -382,8 +382,19 @@ async function unfinishedChats(propertyIds: string[]): Promise<UnfinishedChat[]>
   return rows.map((c) => {
     const words = residentWordsOf(c.messages);
     const u = byId.get(c.unitId);
-    const reason = c.reviewReason === "assistant_failed" ? "assistant_failed" : "unfinished";
-    return { id: c.id, residentName: c.resident.displayName, unitLabel: u?.label ?? "", propertyName: u?.property.name ?? "", reason, reasonText: REVIEW_REASONS[reason], since: c.reviewSince!.toISOString(), words: words.length > 600 ? `${words.slice(0, 597)}…` : words, urgent: safetyScreen(words).severity !== "ROUTINE" };
+    const reason: ReviewReason = c.reviewReason === "assistant_failed" || c.reviewReason === "call_ended" ? c.reviewReason : "unfinished";
+    return {
+      id: c.id,
+      channel: c.channel === "VOICE" ? "VOICE" : "CHAT",
+      residentName: c.resident.displayName,
+      unitLabel: u?.label ?? "",
+      propertyName: u?.property.name ?? "",
+      reason,
+      reasonText: REVIEW_REASONS[reason],
+      since: c.reviewSince!.toISOString(),
+      words: words.length > 600 ? `${words.slice(0, 597)}…` : words,
+      urgent: safetyScreen(words).severity !== "ROUTINE",
+    };
   });
 }
 

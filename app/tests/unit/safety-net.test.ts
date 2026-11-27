@@ -45,4 +45,11 @@ describe("an unfinished conversation goes to a person once it is idle", () => {
     assert.equal(idleReviewDue({ ...base, messages: [{ role: "relay", text: "Hi, I'm Relay." }], updatedAt: ago(60) }, now, 30), false);
     assert.equal(idleReviewDue({ ...base, status: "ABANDONED", updatedAt: ago(60) }, now, 30), false);
   });
+  test("a voice call counts as cut off after minutes of silence, a chat only after the half hour", () => {
+    // The defaults (VOICE_IDLE_MINUTES 5, INTAKE_IDLE_MINUTES 30): a live call is never silent that long.
+    assert.equal(idleReviewDue({ ...base, channel: "VOICE", updatedAt: ago(6) }, now), true);
+    assert.equal(idleReviewDue({ ...base, channel: "VOICE", updatedAt: ago(4) }, now), false);
+    assert.equal(idleReviewDue({ ...base, channel: "CHAT", updatedAt: ago(6) }, now), false);
+    assert.equal(idleReviewDue({ ...base, updatedAt: ago(31) }, now), true, "a chat by default");
+  });
 });

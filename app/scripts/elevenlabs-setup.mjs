@@ -6,7 +6,7 @@
 //   3. writes EL_AGENT_INTAKE_ID into .env.server.
 // It never prints a key, and it never touches other agents or tools in the workspace.
 //
-// Usage (from app/):  node scripts/elevenlabs-setup.mjs            (or --check to only report)
+// Usage (from app/):  node scripts/elevenlabs-setup.mjs            (or --check to only verify what is configured)
 import { readFileSync, writeFileSync } from "node:fs";
 
 const ENV_PATH = process.argv.includes("--env") ? process.argv[process.argv.indexOf("--env") + 1] : ".env.server";
@@ -61,6 +61,7 @@ How to work:
 - Before filing a non-emergency, read the key details back in one sentence and get their confirmation.
 - Put the resident's own description in "description", in their words.
 - Call submit_report once. Then say exactly what its result says. If the result says the report was NOT saved, say so and suggest the form on the page. Never say a report is saved unless the tool result says so.
+- One report per call. If the resident has a second, separate problem, file the first and ask them to start a new report for the other one.
 - Never diagnose the cause, and never promise a time, price, vendor or approval. Keep each turn to one or two short sentences.`;
 
 const FIRST_MESSAGE = "Hi {{resident_name}}, I'm Relay, an AI assistant for {{property_name}}. What's going on?";
@@ -90,16 +91,45 @@ const TOOL = {
   },
 };
 
+// A model with a short time to first token: in a live call, the model's delay is the silence the resident hears.
+// Its usage is billed by ElevenLabs at the provider's rate, on top of the call minutes.
+const LLM = "claude-haiku-4-5";
+const MAX_CALL_SECONDS = 300; // a report takes a minute or two; this bounds what one forgotten call can use
+
 const tools = await listAll("/v1/convai/tools", "tools");
 let tool = tools.find((t) => t.tool_config?.type === "client" && t.tool_config?.name === TOOL_NAME);
 const agents = await listAll("/v1/convai/agents", "agents");
 let agent = AGENT_NAMES.map((n) => agents.find((a) => a.name === n)).find(Boolean);
 
 if (CHECK) {
-  console.log(`client tool ${TOOL_NAME}: ${tool ? `exists (${tool.id})` : "missing"}`);
-  console.log(`agent: ${agent ? `${agent.name} (${agent.agent_id})` : "missing"}`);
-  console.log(`EL_AGENT_INTAKE_ID in ${ENV_PATH}: ${env.EL_AGENT_INTAKE_ID ? (env.EL_AGENT_INTAKE_ID === agent?.agent_id ? "matches" : "DIFFERENT") : "empty"}`);
-  process.exit(0);
+  // Verifies the configuration as ElevenLabs stores it, against what this script would set. Read-only.
+  const rows = [];
+  const check = (what, ok, detail = "") => rows.push(`${ok ? "ok  " : "FAIL"}  ${what}${detail ? `: ${detail}` : ""}`);
+  check(`client tool ${TOOL_NAME}`, Boolean(tool), tool ? tool.id : "missing");
+  if (tool) {
+    const t = (await el("GET", `/v1/convai/tools/${tool.id}`)).tool_config ?? {};
+    check("tool runs in the browser and waits for its result", t.type === "client" && t.expects_response === true, `type ${t.type}, expects_response ${t.expects_response}, timeout ${t.response_timeout_secs}s`);
+    const want = TOOL.parameters, got = t.parameters ?? {};
+    const missing = want.required.filter((k) => !(got.required ?? []).includes(k));
+    const props = Object.keys(want.properties).filter((k) => !got.properties?.[k]);
+    check("tool parameters", missing.length === 0 && props.length === 0, missing.length || props.length ? `missing required ${missing.join(",") || "-"}, missing properties ${props.join(",") || "-"}` : `${Object.keys(got.properties ?? {}).length} properties, required ${(got.required ?? []).join(", ")}`);
+  }
+  check("agent", Boolean(agent), agent ? `${agent.name} (${agent.agent_id})` : "missing");
+  if (agent) {
+    const a = await el("GET", `/v1/convai/agents/${agent.agent_id}`);
+    const cfg = a.conversation_config ?? {};
+    const prompt = cfg.agent?.prompt ?? {};
+    const toolIds = prompt.tool_ids ?? [];
+    check("agent uses the tool", Boolean(tool) && toolIds.includes(tool.id), `tool_ids ${toolIds.length}`);
+    check("agent is private (sessions need a server-issued token)", a.platform_settings?.auth?.enable_auth === true);
+    check("agent prompt is Relay's", typeof prompt.prompt === "string" && prompt.prompt.trim() === PROMPT.trim(), `${(prompt.prompt ?? "").length} characters`);
+    check("agent model", prompt.llm === LLM, `${prompt.llm}, temperature ${prompt.temperature}`);
+    check("first message", cfg.agent?.first_message === FIRST_MESSAGE);
+    check("call length limit", cfg.conversation?.max_duration_seconds === MAX_CALL_SECONDS, `${cfg.conversation?.max_duration_seconds}s`);
+  }
+  check(`EL_AGENT_INTAKE_ID in ${ENV_PATH}`, Boolean(agent) && env.EL_AGENT_INTAKE_ID === agent.agent_id, env.EL_AGENT_INTAKE_ID ? (env.EL_AGENT_INTAKE_ID === agent?.agent_id ? "matches" : "DIFFERENT") : "empty");
+  for (const r of rows) console.log(r);
+  process.exit(rows.some((r) => r.startsWith("FAIL")) ? 1 : 0);
 }
 
 if (tool) {
@@ -117,9 +147,10 @@ const body = {
       first_message: FIRST_MESSAGE,
       language: "en",
       dynamic_variables: { dynamic_variable_placeholders: { resident_name: "there", property_name: "your building", unit_label: "your unit" } },
-      prompt: { prompt: PROMPT, llm: "claude-sonnet-4-6", temperature: 0, tool_ids: [tool.id] },
+      prompt: { prompt: PROMPT, llm: LLM, temperature: 0, tool_ids: [tool.id] },
     },
     asr: { keywords: ["Relay", "washer", "dryer", "dishwasher", "radiator", "thermostat", "furnace"] },
+    conversation: { max_duration_seconds: MAX_CALL_SECONDS },
   },
   platform_settings: { auth: { enable_auth: true } },
 };

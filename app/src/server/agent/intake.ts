@@ -81,14 +81,14 @@ async function reload(id: string): Promise<ConversationView> {
 export async function getConversation(actor: ActorCtx, input: { unitId: string; fresh?: boolean; conversationId?: string }): Promise<ConversationView> {
   const r = await residencyFor(actor.userId!, input?.unitId);
   if (!input.fresh && typeof input.conversationId === "string") {
-    const mine = await prisma.intakeConversation.findFirst({ where: { id: input.conversationId, residentId: actor.userId!, unitId: r.unitId }, include: { case: { select: { number: true } } } });
+    const mine = await prisma.intakeConversation.findFirst({ where: { id: input.conversationId, residentId: actor.userId!, unitId: r.unitId, channel: "CHAT" }, include: { case: { select: { number: true } } } });
     if (mine) return view(mine, mine.case ? caseRef(mine.case.number) : null);
   }
   if (!input.fresh) {
-    const open = await prisma.intakeConversation.findFirst({ where: { residentId: actor.userId!, unitId: r.unitId, status: "OPEN" }, orderBy: { createdAt: "desc" } });
+    const open = await prisma.intakeConversation.findFirst({ where: { residentId: actor.userId!, unitId: r.unitId, status: "OPEN", channel: "CHAT" }, orderBy: { createdAt: "desc" } });
     if (open) return view(open, null);
   } else {
-    await prisma.intakeConversation.updateMany({ where: { residentId: actor.userId!, unitId: r.unitId, status: "OPEN" }, data: { status: "ABANDONED", pendingSince: null } });
+    await prisma.intakeConversation.updateMany({ where: { residentId: actor.userId!, unitId: r.unitId, status: "OPEN", channel: "CHAT" }, data: { status: "ABANDONED", pendingSince: null } });
   }
   const first = actor.name.split(" ")[0];
   const greeting: ChatTurn = {
@@ -105,7 +105,7 @@ export async function sendIntakeMessage(actor: ActorCtx, input: { conversationId
   const text = str(input?.text, 1500);
   if (text.length < 1) throw new HttpError(400, "Write a message first.");
   const conv = await prisma.intakeConversation.findUnique({ where: { id: String(input?.conversationId ?? "") } });
-  if (!conv || conv.residentId !== actor.userId) throw new HttpError(404, "Conversation not found.");
+  if (!conv || conv.residentId !== actor.userId || conv.channel !== "CHAT") throw new HttpError(404, "Conversation not found.");
   if (conv.status !== "OPEN") throw new HttpError(409, "This conversation is closed. Start a new report.", { code: "conversation_closed" });
   // Every turn resends the conversation to the model, so a conversation has a length limit.
   if ((conv.messages as ChatTurn[]).filter((m) => m.role === "resident").length >= MAX_RESIDENT_MESSAGES) {
@@ -135,8 +135,9 @@ export async function sendIntakeMessage(actor: ActorCtx, input: { conversationId
 }
 
 /**
- * Files a chat report from the resident's own words, without the assistant: by the safety net (a possible emergency)
- * or by a manager reviewing an unfinished chat. Idempotent: the conversation's request id returns the same case.
+ * Files a chat or call report from the resident's own words, without the assistant: by the safety net (a possible
+ * emergency) or by a manager reviewing an unfinished conversation. Idempotent: the conversation's request id returns
+ * the same case.
  */
 async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } | { kind: "MANAGER"; name: string; userId: number }) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -149,8 +150,9 @@ async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } |
     }
     const words = residentWordsOf(c.messages).trim();
     if (!words) return null;
+    const voice = c.channel === "VOICE";
     const actor: ActorCtx = { kind: "RESIDENT", userId: c.residentId, name: c.resident.displayName, vendorId: null };
-    const res = await createCase(actor, { unitId: c.unitId, channel: "CHAT", clientRequestId: c.clientRequestId, description: words, filedBy: by.kind === "SAFETY_NET" ? { kind: "SAFETY_NET" } : { kind: "MANAGER", name: by.name } });
+    const res = await createCase(actor, { unitId: c.unitId, channel: voice ? "VOICE" : "CHAT", clientRequestId: c.clientRequestId, description: words, filedBy: by.kind === "SAFETY_NET" ? { kind: "SAFETY_NET" } : { kind: "MANAGER", name: by.name } });
     const reply =
       by.kind === "SAFETY_NET"
         ? `This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. ${res.message}`
@@ -158,6 +160,8 @@ async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } |
     const now = new Date();
     const prior = ((c.facts ?? {}) as Record<string, unknown>)[FILED_KEY];
     // Compare-and-set on the last change, so a message the resident sent meanwhile is never overwritten.
+    // A call's transcript holds only what was said on the call: the resident hears the outcome from the voice agent
+    // (its submit_report gets this case) and sees it on the page, so no line is added to it.
     const w = await prisma.intakeConversation.updateMany({
       where: { id: c.id, caseId: null, updatedAt: c.updatedAt },
       data: {
@@ -165,7 +169,7 @@ async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } |
         caseId: res.caseId,
         pendingSince: null,
         lastError: null,
-        messages: [...(c.messages as ChatTurn[]), { role: "relay", text: reply, at: now.toISOString() }] as object[],
+        messages: (voice ? (c.messages as ChatTurn[]) : [...(c.messages as ChatTurn[]), { role: "relay", text: reply, at: now.toISOString() }]) as object[],
         facts: { ...((c.facts ?? {}) as object), [FILED_KEY]: [...(Array.isArray(prior) ? prior : []), { caseId: res.caseId, ref: res.ref, action: "filed" }] } as object,
         ...(c.reviewSince && !c.reviewOutcome ? { reviewOutcome: "filed", reviewedAt: now, reviewedById: by.kind === "MANAGER" ? by.userId : null } : {}),
       },
@@ -174,7 +178,8 @@ async function fileFromChat(conversationId: string, by: { kind: "SAFETY_NET" } |
       await settleReviewAlerts(c.id);
       // The resident is usually not on the chat page any more: tell them a person read it and filed it.
       if (by.kind === "MANAGER") {
-        await prisma.$transaction((tx) => notify(tx, [c.residentId], res.caseId, "chat-filed", { kind: "UPDATE", email: true, title: `Your report was filed: ${res.ref}`, body: `${by.name} read your conversation with Relay's assistant and filed it as ${res.ref}. You can follow it in Relay.` }));
+        const read = voice ? "read the transcript of your call with Relay's voice assistant" : "read your conversation with Relay's assistant";
+        await prisma.$transaction((tx) => notify(tx, [c.residentId], res.caseId, "chat-filed", { kind: "UPDATE", email: true, title: `Your report was filed: ${res.ref}`, body: `${by.name} ${read} and filed it as ${res.ref}. You can follow it in Relay.` }));
         kickEmail();
       }
       afterFiling([{ caseId: res.caseId, ref: res.ref, action: "filed" }]);
@@ -235,11 +240,12 @@ export async function flagForReview(conversationId: string, reason: ReviewReason
     });
     if (won.count === 0) return true;
     const urgent = safetyScreen(words).severity !== "ROUTINE";
+    const voice = c.channel === "VOICE";
     await notify(tx, await managerIds(tx, unit.propertyId), null, `intake-review:${c.id}:${now.getTime()}`, {
       kind: urgent ? "REVIEW_NEEDED" : "ACTION",
       event: "intake.review",
-      title: `Unfinished chat report${urgent ? " (urgent by the safety rules)" : ""}: ${c.resident.displayName}, unit ${unit.label}`,
-      body: `${REVIEW_REASONS[reason]}. They wrote: "${words.length > 300 ? `${words.slice(0, 297)}…` : words}" File it as a case or close it from the command center.`,
+      title: `Unfinished ${voice ? "voice" : "chat"} report${urgent ? " (urgent by the safety rules)" : ""}: ${c.resident.displayName}, unit ${unit.label}`,
+      body: `${REVIEW_REASONS[reason]}. They ${voice ? "said" : "wrote"}: "${words.length > 300 ? `${words.slice(0, 297)}…` : words}" File it as a case or close it from the command center.`,
     });
     return true;
   });
@@ -548,6 +554,154 @@ function afterFiling(filed: FiledRef[]) {
   kickEmail();
 }
 
+// ───────────────────────── voice calls ─────────────────────────
+//
+// A call runs between the resident's browser and the voice provider (ElevenLabs), not through this server. So the
+// browser forwards the call as it happens (recordVoiceEvent), and the same safety net as a chat applies to it:
+//   - every line the resident says is kept, in their words, before anything else happens to it;
+//   - a possible emergency in those words is filed at once by the rules, whatever the voice agent does;
+//   - a call that ends with nothing filed goes to the property's managers at once (a call cannot be resumed the way
+//     a chat can), and a call that went silent without ending (a closed tab, a crash) goes to them from the sweep;
+//   - when the voice agent files (submit_report), the call's record is closed with that case: one case either way.
+
+const MAX_VOICE_LINES = 160;
+const VOICE_EVENTS = ["connected", "resident", "relay", "ended"] as const;
+export type VoiceEventResult = {
+  conversationId: string;
+  /** The call's report, once filed (by the safety rules on this event, or earlier by anyone). */
+  filed: { caseId: string; ref: string; message: string } | null;
+  /** The call ended with nothing filed, and a person now has what the resident said. */
+  passed: boolean;
+};
+
+async function filedOf(caseId: string | null): Promise<VoiceEventResult["filed"]> {
+  if (!caseId) return null;
+  const k = await prisma.case.findUnique({ where: { id: caseId }, select: { number: true } });
+  return k ? { caseId, ref: caseRef(k.number), message: `Your report is saved as ${caseRef(k.number)}.` } : null;
+}
+
+/**
+ * One event of a resident's voice call, from their browser: the call connected (with the provider's id for it), a line
+ * of the transcript (resident or relay), or the call ended. The call's record is keyed by the browser's id for the call
+ * attempt (`attemptId`), which its submit_report also sends as the request id.
+ */
+export async function recordVoiceEvent(actor: ActorCtx, input: { unitId: string; attemptId: string; kind: string; text?: string; callId?: string }): Promise<VoiceEventResult> {
+  const kind = VOICE_EVENTS.find((k) => k === input?.kind);
+  if (!kind) throw new HttpError(400, "Unknown voice event.", { code: "invalid_event" });
+  const attemptId = str(input?.attemptId, 80);
+  if (attemptId.length < 8) throw new HttpError(400, "The call has no id.", { code: "invalid_event" });
+  const line = kind === "resident" || kind === "relay" ? str(input?.text, 1500) : "";
+  if ((kind === "resident" || kind === "relay") && !line) throw new HttpError(400, "The line is empty.", { code: "invalid_event" });
+  const callId = str(input?.callId, 120) || null;
+  const r = await residencyFor(actor.userId!, input?.unitId);
+  const key = { residentId_clientRequestId: { residentId: actor.userId!, clientRequestId: attemptId } };
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let c = await prisma.intakeConversation.findUnique({ where: key });
+    if (!c) {
+      try {
+        c = await prisma.intakeConversation.create({ data: { residentId: actor.userId!, unitId: r.unitId, channel: "VOICE", clientRequestId: attemptId, externalId: callId } });
+      } catch (e) {
+        if ((e as { code?: string })?.code === "P2002") continue; // a concurrent event created it: read it again
+        throw e;
+      }
+    }
+    if (c.channel !== "VOICE" || c.unitId !== r.unitId) throw new HttpError(409, "That id belongs to another report.", { code: "invalid_event" });
+    const done = { conversationId: c.id, passed: false };
+
+    if (kind === "connected") {
+      if (callId && c.externalId !== callId) await prisma.intakeConversation.update({ where: { id: c.id }, data: { externalId: callId } });
+      return { ...done, filed: await filedOf(c.caseId) };
+    }
+    if (kind === "ended") {
+      if (c.caseId) return { ...done, filed: await filedOf(c.caseId) };
+      // A manager already read and closed it, and the resident has said nothing since (new words reopen it).
+      if (c.reviewOutcome === "closed") return { ...done, filed: null, passed: true };
+      // With nothing the resident said there is nothing for a person to read: the sweep closes the empty record.
+      return { ...done, filed: null, passed: await flagForReview(c.id, "call_ended").catch(() => false) };
+    }
+
+    const lines = (Array.isArray(c.messages) ? c.messages : []) as ChatTurn[];
+    if (lines.length >= MAX_VOICE_LINES) return { ...done, filed: await filedOf(c.caseId) };
+    const role = kind === "resident" ? "resident" : "relay";
+    const next: ChatTurn[] = [...lines, { role, text: line, at: new Date().toISOString() }];
+    // A manager who closed an earlier review of this call has not heard this: a later end puts it in front of them again.
+    const reopenReview = role === "resident" && c.reviewOutcome === "closed" ? { reviewSince: null, reviewReason: null, reviewOutcome: null, reviewedAt: null, reviewedById: null, reviewNote: null } : {};
+    // Compare-and-set on the last change: two events never overwrite each other's line.
+    const w = await prisma.intakeConversation.updateMany({
+      where: { id: c.id, updatedAt: c.updatedAt },
+      data: { messages: next as object[], ...(c.status === "ABANDONED" ? { status: "OPEN" as const } : {}), ...reopenReview },
+    });
+    if (w.count === 0) continue;
+    if (role === "relay") return { ...done, filed: await filedOf(c.caseId) };
+
+    const words = residentWordsOf(next);
+    const screen = safetyScreen(words);
+    if (!screen.emergency) return { ...done, filed: await filedOf(c.caseId) };
+    if (c.caseId) {
+      await warnFiledCase(c.id, c.caseId, words, screen.reasons).catch((e) => console.warn("[voice] could not warn the managers:", (e as Error)?.name));
+      return { ...done, filed: await filedOf(c.caseId) };
+    }
+    const f = await fileFromChat(c.id, { kind: "SAFETY_NET" }).catch((e) => {
+      console.warn("[voice] the safety net could not file the report; the call's end or the sweep passes it to a person:", (e as Error)?.name);
+      return null;
+    });
+    if (f) {
+      mark("relay.intake.safety_net.filed", { conversationId: c.id, caseId: f.caseId, channel: "VOICE" });
+      return { ...done, filed: { caseId: f.caseId, ref: f.ref, message: f.message || `Your report is saved as ${f.ref}.` } };
+    }
+    return { ...done, filed: null };
+  }
+  throw new HttpError(409, "The call's record kept changing. Try again.", { code: "voice_event_conflict" });
+}
+
+/**
+ * The call's report was filed as something other than an emergency (by the voice agent, from its own summary), but
+ * the resident's own words on the call read as a possible emergency to the rules: the property's managers are told
+ * at once, on that case, once per call. A person decides; nothing on the case changes by itself.
+ */
+async function warnFiledCase(conversationId: string, caseId: string, words: string, reasons: string[]) {
+  const k = await prisma.case.findUnique({ where: { id: caseId }, include: { unit: true, resident: { select: { displayName: true } } } });
+  if (!k || k.emergency) return;
+  const ref = caseRef(k.number);
+  const said = words.length > 300 ? `…${words.slice(-297)}` : words;
+  await prisma.$transaction(async (tx) =>
+    notify(tx, await managerIds(tx, k.propertyId), k.id, `voice-danger:${conversationId}`, {
+      kind: "EMERGENCY",
+      event: "intake.safety_net",
+      title: `Possible emergency on ${ref}: what the resident said on the call`,
+      body: `${k.resident.displayName}, unit ${k.unit.label}, said on the voice call: "${said}" The safety rules read this as a possible emergency (${reasons.join(" ")}), but ${ref} was filed as ${k.severity.toLowerCase()}. Check it now.`,
+    }),
+  );
+  kickEmail();
+  mark("relay.intake.safety_net.warned", { conversationId, caseId });
+}
+
+/** The voice agent filed the call's report: the call's record is closed with that case, and any review of it settled. */
+async function closeCallWithCase(actor: ActorCtx, attemptId: string, filed: { caseId: string; ref: string }) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const c = await prisma.intakeConversation.findUnique({ where: { residentId_clientRequestId: { residentId: actor.userId!, clientRequestId: attemptId } } });
+    if (!c || c.channel !== "VOICE" || c.caseId) return false;
+    const now = new Date();
+    const prior = ((c.facts ?? {}) as Record<string, unknown>)[FILED_KEY];
+    const inReview = !!c.reviewSince && !c.reviewOutcome;
+    const w = await prisma.intakeConversation.updateMany({
+      where: { id: c.id, caseId: null, updatedAt: c.updatedAt },
+      data: {
+        status: "SUBMITTED",
+        caseId: filed.caseId,
+        facts: { ...((c.facts ?? {}) as object), [FILED_KEY]: [...(Array.isArray(prior) ? prior : []), { caseId: filed.caseId, ref: filed.ref, action: "filed" }] } as object,
+        ...(inReview ? { reviewOutcome: "filed", reviewedAt: now } : {}),
+      },
+    });
+    if (w.count === 1) {
+      if (inReview) await settleReviewAlerts(c.id);
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The voice agent's submit_report (an ElevenLabs client tool) arrives here from the resident's browser session. */
 export async function submitVoiceReport(actor: ActorCtx, input: Record<string, unknown>) {
   const unitId = str(input?.unitId, 60);
@@ -555,10 +709,12 @@ export async function submitVoiceReport(actor: ActorCtx, input: Record<string, u
   const severity = oneOf(input?.severity, SEVERITIES) ?? "URGENT";
   const description = str(input?.description, 2000);
   if (description.length < 8) throw new HttpError(400, "The description is missing.", { code: "invalid_report" });
-  return createCase(actor, {
+  // The call's id: if the safety rules already filed this call, the same id returns that case instead of a second one.
+  const clientRequestId = str(input?.clientRequestId, 80) || randomUUID();
+  const res = await createCase(actor, {
     unitId,
     channel: "VOICE",
-    clientRequestId: str(input?.clientRequestId, 80) || randomUUID(),
+    clientRequestId,
     description,
     permissionToEnter: bool(input?.permission_to_enter),
     accessNotes: str(input?.access_notes, 300) || null,
@@ -573,4 +729,6 @@ export async function submitVoiceReport(actor: ActorCtx, input: Record<string, u
       facts: (input?.facts as Record<string, unknown>) ?? {},
     },
   });
+  await closeCallWithCase(actor, clientRequestId, res).catch((e) => console.warn("[voice] could not close the call's record:", (e as Error)?.name));
+  return res;
 }
