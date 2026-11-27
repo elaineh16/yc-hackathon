@@ -1,0 +1,46 @@
+{
+  "name": "relay",
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test tests/unit/*.test.ts",
+    "test:api": "tsx --test --test-concurrency=1 tests/api/*.test.ts",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "workspaces": [
+    ".wasp/out/*",
+    ".wasp/out/sdk/wasp"
+  ],
+  "dependencies": {
+    "@elevenlabs/react": "^1.23.1",
+    "@fiberai/sdk": "^0.0.66",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@traceroot-ai/traceroot": "^0.8.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.545.0",
+    "nodemailer": "^7.0.13",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router": "^7.12.0",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss": "^4.1.18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "prisma": "5.19.1",
+    "tsx": "^4.23.15",
+    "typescript": "5.8.2",
+    "vite": "^7.0.6"
+  },
+  "allowScripts": {
+    "@prisma/engines@5.19.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@5.19.1": true
+  }
+}

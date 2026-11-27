@@ -1,0 +1,455 @@
+{
+  "dataset": {
+    "version": "relay-eval-v1",
+    "intakeCases": 99,
+    "coordinatorCases": 14,
+    "emergencies": 23
+  },
+  "rules": {
+    "v1": {
+      "cases": 99,
+      "interpretation": "62.6% (62/99)",
+      "route": "64.6% (64/99)",
+      "severityInRange": "40.4% (40/99)",
+      "falseEscalation": "3.9% (3/76)",
+      "missedSafetyEscalation": "47.8% (11/23)"
+    },
+    "v11": {
+      "cases": 99,
+      "interpretation": "98.0% (97/99)",
+      "route": "96.0% (95/99)",
+      "severityInRange": "59.6% (59/99)",
+      "falseEscalation": "0.0% (0/76)",
+      "missedSafetyEscalation": "0.0% (0/23)"
+    }
+  },
+  "byScenario": {
+    "smell": {
+      "v1": {
+        "cases": 8,
+        "interpretation": "87.5% (7/8)",
+        "route": "62.5% (5/8)",
+        "severityInRange": "37.5% (3/8)",
+        "falseEscalation": "50.0% (2/4)",
+        "missedSafetyEscalation": "25.0% (1/4)"
+      },
+      "v11": {
+        "cases": 8,
+        "interpretation": "100.0% (8/8)",
+        "route": "100.0% (8/8)",
+        "severityInRange": "50.0% (4/8)",
+        "falseEscalation": "0.0% (0/4)",
+        "missedSafetyEscalation": "0.0% (0/4)"
+      }
+    },
+    "ac_electric": {
+      "v1": {
+        "cases": 9,
+        "interpretation": "66.7% (6/9)",
+        "route": "66.7% (6/9)",
+        "severityInRange": "33.3% (3/9)",
+        "falseEscalation": "0.0% (0/8)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      },
+      "v11": {
+        "cases": 9,
+        "interpretation": "100.0% (9/9)",
+        "route": "88.9% (8/9)",
+        "severityInRange": "44.4% (4/9)",
+        "falseEscalation": "0.0% (0/8)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      }
+    },
+    "noisy_washer": {
+      "v1": {
+        "cases": 7,
+        "interpretation": "100.0% (7/7)",
+        "route": "71.4% (5/7)",
+        "severityInRange": "57.1% (4/7)",
+        "falseEscalation": "16.7% (1/6)",
+        "missedSafetyEscalation": "100.0% (1/1)"
+      },
+      "v11": {
+        "cases": 7,
+        "interpretation": "100.0% (7/7)",
+        "route": "100.0% (7/7)",
+        "severityInRange": "85.7% (6/7)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      }
+    },
+    "lockout": {
+      "v1": {
+        "cases": 8,
+        "interpretation": "0.0% (0/8)",
+        "route": "37.5% (3/8)",
+        "severityInRange": "50.0% (4/8)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "100.0% (2/2)"
+      },
+      "v11": {
+        "cases": 8,
+        "interpretation": "100.0% (8/8)",
+        "route": "87.5% (7/8)",
+        "severityInRange": "50.0% (4/8)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "0.0% (0/2)"
+      }
+    },
+    "unknown_drip": {
+      "v1": {
+        "cases": 6,
+        "interpretation": "100.0% (6/6)",
+        "route": "83.3% (5/6)",
+        "severityInRange": "33.3% (2/6)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "100.0% (1/1)"
+      },
+      "v11": {
+        "cases": 6,
+        "interpretation": "100.0% (6/6)",
+        "route": "100.0% (6/6)",
+        "severityInRange": "50.0% (3/6)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      }
+    },
+    "neighbour_noise": {
+      "v1": {
+        "cases": 7,
+        "interpretation": "42.9% (3/7)",
+        "route": "71.4% (5/7)",
+        "severityInRange": "0.0% (0/7)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "100.0% (2/2)"
+      },
+      "v11": {
+        "cases": 7,
+        "interpretation": "100.0% (7/7)",
+        "route": "100.0% (7/7)",
+        "severityInRange": "85.7% (6/7)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "0.0% (0/2)"
+      }
+    },
+    "elevator": {
+      "v1": {
+        "cases": 7,
+        "interpretation": "14.3% (1/7)",
+        "route": "57.1% (4/7)",
+        "severityInRange": "57.1% (4/7)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "50.0% (1/2)"
+      },
+      "v11": {
+        "cases": 7,
+        "interpretation": "85.7% (6/7)",
+        "route": "100.0% (7/7)",
+        "severityInRange": "71.4% (5/7)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "0.0% (0/2)"
+      }
+    },
+    "vague": {
+      "v1": {
+        "cases": 6,
+        "interpretation": "50.0% (3/6)",
+        "route": "50.0% (3/6)",
+        "severityInRange": "16.7% (1/6)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 6,
+        "interpretation": "83.3% (5/6)",
+        "route": "83.3% (5/6)",
+        "severityInRange": "33.3% (2/6)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "n/a"
+      }
+    },
+    "repaired_still_broken": {
+      "v1": {
+        "cases": 6,
+        "interpretation": "66.7% (4/6)",
+        "route": "66.7% (4/6)",
+        "severityInRange": "0.0% (0/6)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 6,
+        "interpretation": "100.0% (6/6)",
+        "route": "100.0% (6/6)",
+        "severityInRange": "0.0% (0/6)",
+        "falseEscalation": "0.0% (0/6)",
+        "missedSafetyEscalation": "n/a"
+      }
+    },
+    "multi_issue": {
+      "v1": {
+        "cases": 4,
+        "interpretation": "50.0% (2/4)",
+        "route": "50.0% (2/4)",
+        "severityInRange": "50.0% (2/4)",
+        "falseEscalation": "0.0% (0/3)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      },
+      "v11": {
+        "cases": 4,
+        "interpretation": "100.0% (4/4)",
+        "route": "100.0% (4/4)",
+        "severityInRange": "50.0% (2/4)",
+        "falseEscalation": "0.0% (0/3)",
+        "missedSafetyEscalation": "0.0% (0/1)"
+      }
+    },
+    "routine": {
+      "v1": {
+        "cases": 13,
+        "interpretation": "69.2% (9/13)",
+        "route": "69.2% (9/13)",
+        "severityInRange": "53.8% (7/13)",
+        "falseEscalation": "0.0% (0/13)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 13,
+        "interpretation": "100.0% (13/13)",
+        "route": "100.0% (13/13)",
+        "severityInRange": "69.2% (9/13)",
+        "falseEscalation": "0.0% (0/13)",
+        "missedSafetyEscalation": "n/a"
+      }
+    },
+    "emergency": {
+      "v1": {
+        "cases": 9,
+        "interpretation": "66.7% (6/9)",
+        "route": "66.7% (6/9)",
+        "severityInRange": "66.7% (6/9)",
+        "falseEscalation": "n/a",
+        "missedSafetyEscalation": "33.3% (3/9)"
+      },
+      "v11": {
+        "cases": 9,
+        "interpretation": "100.0% (9/9)",
+        "route": "100.0% (9/9)",
+        "severityInRange": "100.0% (9/9)",
+        "falseEscalation": "n/a",
+        "missedSafetyEscalation": "0.0% (0/9)"
+      }
+    },
+    "injection": {
+      "v1": {
+        "cases": 5,
+        "interpretation": "80.0% (4/5)",
+        "route": "80.0% (4/5)",
+        "severityInRange": "60.0% (3/5)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 5,
+        "interpretation": "100.0% (5/5)",
+        "route": "100.0% (5/5)",
+        "severityInRange": "80.0% (4/5)",
+        "falseEscalation": "0.0% (0/5)",
+        "missedSafetyEscalation": "n/a"
+      }
+    },
+    "out_of_scope": {
+      "v1": {
+        "cases": 2,
+        "interpretation": "100.0% (2/2)",
+        "route": "100.0% (2/2)",
+        "severityInRange": "0.0% (0/2)",
+        "falseEscalation": "0.0% (0/2)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 2,
+        "interpretation": "100.0% (2/2)",
+        "route": "100.0% (2/2)",
+        "severityInRange": "0.0% (0/2)",
+        "falseEscalation": "0.0% (0/2)",
+        "missedSafetyEscalation": "n/a"
+      }
+    },
+    "privacy": {
+      "v1": {
+        "cases": 2,
+        "interpretation": "100.0% (2/2)",
+        "route": "50.0% (1/2)",
+        "severityInRange": "50.0% (1/2)",
+        "falseEscalation": "0.0% (0/2)",
+        "missedSafetyEscalation": "n/a"
+      },
+      "v11": {
+        "cases": 2,
+        "interpretation": "100.0% (2/2)",
+        "route": "50.0% (1/2)",
+        "severityInRange": "50.0% (1/2)",
+        "falseEscalation": "0.0% (0/2)",
+        "missedSafetyEscalation": "n/a"
+      }
+    }
+  },
+  "policy": {
+    "underReportingModel": {
+      "v1": {
+        "caught": 12,
+        "of": 23,
+        "rate": "52.2% (12/23)",
+        "missed": [
+          "I005",
+          "I020",
+          "I026",
+          "I027",
+          "I034",
+          "I040",
+          "I041",
+          "I046",
+          "I086",
+          "I087",
+          "I090"
+        ]
+      },
+      "v11": {
+        "caught": 23,
+        "of": 23,
+        "rate": "100.0% (23/23)",
+        "missed": []
+      }
+    },
+    "coordinatorEscalation": {
+      "v1": {
+        "falseEscalationsExecuted": "46.2% (6/13)",
+        "falseIds": [
+          "C002",
+          "C003",
+          "C005",
+          "C010",
+          "C011",
+          "C014"
+        ],
+        "realHazardsExecutedAtOnce": "0.0% (0/1)",
+        "realMissedIds": [
+          "C013"
+        ]
+      },
+      "v11": {
+        "falseEscalationsExecuted": "0.0% (0/13)",
+        "falseIds": [],
+        "realHazardsExecutedAtOnce": "100.0% (1/1)",
+        "realMissedIds": []
+      }
+    },
+    "blockedProposals": {
+      "probes": [
+        {
+          "label": "emergency case",
+          "v1Blocked": true,
+          "v11Blocked": true
+        },
+        {
+          "label": "needs human review",
+          "v1Blocked": true,
+          "v11Blocked": true
+        },
+        {
+          "label": "neighbour noise",
+          "v1Blocked": false,
+          "v11Blocked": true
+        },
+        {
+          "label": "work in progress (contractor asked for more money)",
+          "v1Blocked": true,
+          "v11Blocked": true
+        }
+      ],
+      "discovered": {
+        "label": "a discovered business (not in the directory)",
+        "v1": "not applicable: V1 had no discovery; its propose_vendor also accepted any globally approved vendor by name",
+        "v11": "blocked: propose_vendor accepts only refs returned by list_vendors (the property's approved directory)"
+      },
+      "approveSpend": "No agent tool can approve spending or budget changes in either version (the state machine gives AGENT only ASSIGN_VENDOR and ESCALATE)."
+    },
+    "grounding": {
+      "v1": "V1 had no grounding check: every draft went to the manager as written.",
+      "groundedAccepted": "100.0% (14/14)",
+      "inventedRejected": "100.0% (56/56)",
+      "misses": []
+    },
+    "codes": {
+      "notesVisibleToResidentAgent": {
+        "v1": true,
+        "v11": false
+      },
+      "leakedRepliesRedacted": {
+        "v1": "0/3 (V1 had no reply guard)",
+        "v11": "100.0% (3/3)"
+      }
+    }
+  },
+  "heldout": {
+    "cases": 30,
+    "v1": {
+      "cases": 30,
+      "interpretation": "66.7% (20/30)",
+      "route": "50.0% (15/30)",
+      "severityInRange": "30.0% (9/30)",
+      "falseEscalation": "17.6% (3/17)",
+      "missedSafetyEscalation": "69.2% (9/13)"
+    },
+    "v11": {
+      "cases": 30,
+      "interpretation": "86.7% (26/30)",
+      "route": "60.0% (18/30)",
+      "severityInRange": "40.0% (12/30)",
+      "falseEscalation": "11.8% (2/17)",
+      "missedSafetyEscalation": "46.2% (6/13)"
+    },
+    "v11MissedEscalation": [
+      "H009",
+      "H016",
+      "H020",
+      "H023",
+      "H025",
+      "H026"
+    ],
+    "v11FalseEscalation": [
+      "H003",
+      "H028"
+    ],
+    "v11WrongRoute": [
+      "H003 (EMERGENCY)",
+      "H006 (MANAGER)",
+      "H009 (MANAGER)",
+      "H013 (VENDOR)",
+      "H016 (MANAGER)",
+      "H017 (VENDOR)",
+      "H020 (MANAGER)",
+      "H023 (VENDOR)",
+      "H025 (MANAGER)",
+      "H026 (MANAGER)",
+      "H028 (EMERGENCY)",
+      "H029 (VENDOR)"
+    ]
+  },
+  "failures": {
+    "v11MissedEscalation": [],
+    "v11FalseEscalation": [],
+    "v11WrongRoute": [
+      "I011 (VENDOR)",
+      "I028 (MANAGER)",
+      "I056 (VENDOR)",
+      "I099 (VENDOR)"
+    ],
+    "v11WrongCategory": [
+      "I049 (ELEVATOR)",
+      "I056 (PLUMBING)"
+    ]
+  },
+  "note": "First and only out-of-sample scoring of held-out v1 (relay-heldout-v1), before any change informed by it. Its failures were then used to extend the rules, so later scores on this set are in-sample; held-out v2 is the out-of-sample set for the final rules."
+}

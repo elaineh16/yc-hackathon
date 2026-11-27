@@ -1,0 +1,66 @@
+{
+  "generated": "2026-11-23T21:48:38.031Z",
+  "release": "https://github.com/elaineh16/yc-hackathon/releases/tag/relay-v1.1-preview",
+  "videos": [
+    {
+      "file": "relay-technical-walkthrough.mp4",
+      "seconds": 290,
+      "width": 1920,
+      "height": 1080,
+      "codec": "H.264 + AAC (Chrome MediaRecorder)",
+      "megabytes": 29.6,
+      "captions": "captions/relay-technical-walkthrough.srt",
+      "script": "TECHNICAL_WALKTHROUGH.md",
+      "narration": "Windows OneCore voice 'Microsoft Mark', local",
+      "avSyncMeasured": "audio vs captions within 0.1 s at two points (av-sync-check.mjs)"
+    },
+    {
+      "file": "relay-product-demo.mp4",
+      "seconds": 327,
+      "megabytes": 52.3,
+      "footageShare": 0.98,
+      "modelTimeCutSeconds": 306,
+      "screenshots": [
+        "screenshots/00-intro-attention.jpg",
+        "screenshots/00-intro-your-move.jpg",
+        "screenshots/01-resident-chat-confirmation.jpg",
+        "screenshots/02-manager-workspace-your-move.jpg",
+        "screenshots/02-manager-workspace-next-action.jpg",
+        "screenshots/03-fiber-header.jpg",
+        "screenshots/03-fiber-gap.jpg",
+        "screenshots/04-contractor-accepts-request.jpg",
+        "screenshots/04-contractor-accepts-times.jpg",
+        "screenshots/05-manager-approves-next-action.jpg",
+        "screenshots/05-manager-approves-approval.jpg",
+        "screenshots/06-resident-time-times.jpg",
+        "screenshots/06-resident-time-confirmed.jpg",
+        "screenshots/07-contractor-completes-done.jpg",
+        "screenshots/08-resident-followup-ask.jpg",
+        "screenshots/08-resident-followup-inbox.jpg",
+        "screenshots/09-mailpit-email.jpg",
+        "screenshots/10-resident-confirms-resolved.jpg",
+        "screenshots/11-not-fixed-ask.jpg",
+        "screenshots/11-not-fixed-reopened.jpg",
+        "screenshots/12-vague-question.jpg",
+        "screenshots/13-safety-attention.jpg",
+        "screenshots/13-safety-emergency.jpg",
+        "screenshots/14-guard-guard.jpg",
+        "screenshots/15-final-resolved.jpg",
+        "screenshots/15-final-timeline.jpg"
+      ],
+      "title": "Relay: from request to resolution",
+      "width": 1920,
+      "height": 1080,
+      "codec": "H.264 + AAC (Chrome MediaRecorder)",
+      "captions": [
+        "captions/relay-product-demo.srt",
+        "captions/relay-product-demo.vtt"
+      ],
+      "script": "PRODUCT_DEMO_SCRIPT.md",
+      "shotList": "SHOT_LIST.md",
+      "narration": "Kokoro-82M \"af_heart\" (open weights, Apache-2.0), run locally on the CPU",
+      "fiber": "live search through the manager interface: 20 places, 3 kept, 2 credits",
+      "voiceIntake": "not recorded; text chat shown"
+    }
+  ]
+}

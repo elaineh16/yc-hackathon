@@ -1,0 +1,374 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Relay demo renderer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap" />
+<style>
+  html, body { margin: 0; background: #0b0d11; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// Lays out a timeline of real recorded frames, slides, narration and captions on a 1920×1080 canvas in real time,
+// and records it with Chrome's MediaRecorder. Driven by render.mjs; reads ?timeline=<url>.
+const W = 1920, H = 1080, FPS = 30;
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const status = (s) => (document.title = s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+
+async function main() {
+  const url = new URLSearchParams(location.search).get("timeline");
+  const tl = await (await fetch(url)).json();
+  await Promise.all([document.fonts.load("500 34px 'IBM Plex Sans'"), document.fonts.load("600 24px 'IBM Plex Sans'"), document.fonts.load("700 112px 'IBM Plex Sans'")]).catch(() => undefined);
+  const base = url.replace(/[^/]*$/, "");
+  const total = tl.duration;
+
+  // Which source image each output frame shows, worked out ahead of time.
+  const plan = [];
+  for (let i = 0; i < Math.ceil(total * FPS); i++) plan.push(locate(tl, i / FPS));
+  const needed = [...new Set(plan.flatMap((p) => p.layers.map((l) => l.src)).filter(Boolean))];
+  status(`frames to decode: ${needed.length}`);
+
+  const cache = new Map();
+  const loading = new Map();
+  const load = (src) => {
+    if (cache.has(src)) return Promise.resolve(cache.get(src));
+    if (!loading.has(src)) loading.set(src, fetch(base + src).then((r) => r.blob()).then((b) => createImageBitmap(b)).then((bmp) => (cache.set(src, bmp), loading.delete(src), bmp)));
+    return loading.get(src);
+  };
+  // Static images (slides, cards) stay loaded; recorded frames are streamed ahead of time and released after use.
+  for (const s of tl.images ?? []) await load(s);
+
+  // Narration.
+  const actx = new AudioContext({ sampleRate: 48000 });
+  await actx.resume();
+  const dest = actx.createMediaStreamDestination();
+  const buffers = [];
+  for (const a of tl.audio) buffers.push({ at: a.at, buf: await actx.decodeAudioData(await (await fetch(base + a.src)).arrayBuffer()), gain: a.gain ?? 1 });
+
+  // Prefetch the first stretch of frames before recording starts.
+  const order = [];
+  for (const p of plan) for (const l of p.layers) if (l.src && order[order.length - 1] !== l.src) order.push(l.src);
+  for (const s of order.slice(0, 40)) await load(s);
+
+  const stream = canvas.captureStream(FPS);
+  stream.addTrack(dest.stream.getAudioTracks()[0]);
+  const mime = ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus"].find((t) => MediaRecorder.isTypeSupported(t));
+  // Warm the encoder up with a throwaway recording: the first encoder start in a process can take seconds, and a
+  // video track that starts late would sit seconds ahead of the audio track for the whole video.
+  {
+    const warm = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_000_000 });
+    let got = 0;
+    warm.ondataavailable = (e) => (got += e.data.size);
+    warm.start(250);
+    const until = performance.now() + 15000;
+    while (performance.now() < until && got < 50_000) {
+      draw(plan[0], 0, tl, cache);
+      await sleep(33);
+    }
+    await new Promise((r) => ((warm.onstop = r), warm.stop()));
+    status(`encoder warmed up (${got} bytes)`);
+  }
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: tl.videoBitsPerSecond ?? 4_000_000, audioBitsPerSecond: 160_000 });
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+
+  draw(plan[0], 0, tl, cache);
+  // The audio clock can take a moment to start on some machines: begin recording only once it is moving, so the
+  // video and the narration share one clock from the first frame.
+  const c0 = actx.currentTime;
+  while (actx.currentTime <= c0 + 0.05) await sleep(20);
+  rec.start(1000);
+  // The encoder stalls for its first few seconds; a still pre-roll absorbs that, then the timeline starts.
+  const preroll = tl.preroll ?? 4;
+  const t0 = actx.currentTime + preroll;
+  await new Promise((resolve) => {
+    const hold = () => (actx.currentTime >= t0 - 0.05 ? resolve() : (draw(plan[0], 0, tl, cache), requestAnimationFrame(hold)));
+    requestAnimationFrame(hold);
+  });
+  for (const b of buffers) {
+    const src = actx.createBufferSource();
+    const g = actx.createGain();
+    g.gain.value = b.gain;
+    src.buffer = b.buf;
+    src.connect(g).connect(dest);
+    // Measured with av-sync-check.mjs: in Chrome's MP4 the audio track lands about 0.5 s ahead of the picture.
+    src.start(t0 + b.at + (tl.audioDelay ?? 0.5));
+  }
+  let ahead = 40;
+  await new Promise((resolve) => {
+    const tick = () => {
+      const t = actx.currentTime - t0;
+      if (t >= total + 0.3) return resolve();
+      const i = Math.max(0, Math.min(plan.length - 1, Math.floor(t * FPS)));
+      draw(plan[i], t, tl, cache);
+      // Keep about two seconds of upcoming frames decoded; release the ones behind.
+      const pos = order.indexOf(plan[i].layers.find((l) => l.src && !tl.images?.includes(l.src))?.src);
+      if (pos >= 0) {
+        for (let k = pos; k < Math.min(order.length, pos + 60); k++) load(order[k]);
+        for (let k = Math.max(0, pos - 80); k < pos - 5; k++) {
+          const s = order[k];
+          if (cache.has(s) && !tl.images?.includes(s)) (cache.get(s).close(), cache.delete(s));
+        }
+      }
+      status(`rendering ${t.toFixed(1)} / ${total.toFixed(1)} s`);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await new Promise((r) => ((rec.onstop = r), rec.stop()));
+  const blob = new Blob(chunks, { type: mime.split(";")[0] });
+  // How long the file really is: Chrome's recorder drops most of the still pre-roll, so captions need the real offset.
+  window.__mediaDuration = await new Promise((resolve) => {
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration)) return resolve(probe.duration);
+      probe.currentTime = 1e9;
+      probe.ontimeupdate = () => resolve(probe.duration);
+    };
+    probe.src = URL.createObjectURL(blob);
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = tl.output ?? (mime.startsWith("video/mp4") ? "video.mp4" : "video.webm");
+  document.body.appendChild(a);
+  status(`done ${mime}`);
+  a.click();
+}
+
+/** What to draw at output time t: the clip (and, during a crossfade, the previous one), with its source frame. */
+function locate(tl, t) {
+  const layers = [];
+  for (const c of tl.clips) {
+    if (t < c.start - (c.fadeIn ?? 0) || t >= c.start + c.duration) continue;
+    // A clip with fadeIn starts drawing slightly before its start, over the end of the previous clip (a crossfade).
+    const local = t - c.start;
+    const src = c.frames ? frameAt(c, Math.max(0, local)) : (c.image ?? null);
+    layers.push({ clip: c.id, src, alpha: local < 0 ? Math.max(0, 1 + local / c.fadeIn) : 1 });
+  }
+  return { t, layers };
+}
+function frameAt(c, local) {
+  // Map output time inside the clip to source time through the clip's segments (cuts and speed-ups).
+  let acc = 0, src = c.segments[c.segments.length - 1].to;
+  for (const s of c.segments) {
+    const len = (s.to - s.from) / (s.rate ?? 1);
+    if (local < acc + len) { src = s.from + (local - acc) * (s.rate ?? 1); break; }
+    acc += len;
+  }
+  const abs = c.t0 + src;
+  let lo = 0, hi = c.frames.length - 1, best = 0;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (c.frames[mid].t <= abs) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+  return c.dir + "/" + c.frames[best].file;
+}
+
+function draw(p, t, tl, cache) {
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#0b0d11";
+  ctx.fillRect(0, 0, W, H);
+  for (const l of p.layers) {
+    const c = tl.clips.find((x) => x.id === l.clip);
+    const img = cache.get(l.src);
+    ctx.globalAlpha = l.alpha;
+    if (c.device === "phone") drawPhone(c, img, t);
+    else if (img) drawDesktop(c, img, t);
+    ctx.globalAlpha = l.alpha;
+    // A desktop scene's label is a lower third: it shows for its first seconds (after any opening title) and fades,
+    // so it does not sit over the app's own header for the rest of the scene.
+    const from = c.title ? c.title.to + 0.4 : 0;
+    const since = t - c.start - from;
+    const labelAlpha = since < 0 ? 0 : since < 0.4 ? since / 0.4 : since < 4.6 ? 1 : since < 5.2 ? (5.2 - since) / 0.6 : 0;
+    if (c.device === "phone" && c.side) side(c.side, Math.min(1, Math.max(0, (t - c.start + 0.2) / 0.6)) * l.alpha);
+    else if (c.label && labelAlpha > 0) {
+      ctx.globalAlpha = l.alpha * labelAlpha;
+      chip(c.label, 40, 36, c.device === "phone" ? "light" : "dark");
+      ctx.globalAlpha = l.alpha;
+    }
+    for (const k of c.cuts ?? []) if (t >= k.at && t < k.at + 2.2) chip(k.text, W - 40, 36, "cut", true);
+    if (c.title) titleOverlay(c.title, t - c.start, l.alpha);
+  }
+  ctx.globalAlpha = 1;
+  // Captions are burned in, except over a clip that shows the same words on screen (the closing card).
+  const quiet = tl.clips.some((c) => c.quiet && t >= c.start && t < c.start + c.duration);
+  const cap = tl.captions.find((x) => t >= x.start && t < x.end);
+  if (cap && !quiet) caption(cap.text);
+  if (tl.debug) chip(`t=${t.toFixed(2)} wall=${((performance.now() - (window.__wall0 ??= performance.now())) / 1000).toFixed(2)}`, W - 40, 110, "dark", true);
+}
+
+function zoomRect(c, t) {
+  for (const z of c.zooms ?? []) {
+    const k = t - z.at;
+    if (k < 0 || k > z.dur) continue;
+    const ramp = 0.7;
+    const f = k < ramp ? ease(k / ramp) : k > z.dur - ramp ? ease((z.dur - k) / ramp) : 1;
+    return { r: z.rect, f };
+  }
+  return null;
+}
+
+function drawDesktop(c, img, t) {
+  let sx = 0, sy = 0, sw = img.width, sh = img.height;
+  const z = zoomRect(c, t);
+  if (z) {
+    const r = z.r;
+    const scale = Math.min(1.7, Math.max(1, Math.min(img.width / r.w, img.height / r.h)));
+    const vw = img.width / scale, vh = img.height / scale;
+    const cx = Math.max(vw / 2, Math.min(img.width - vw / 2, r.x + r.w / 2));
+    const cy = Math.max(vh / 2, Math.min(img.height - vh / 2, r.y + r.h / 2));
+    const tw = vw + (img.width - vw) * (1 - z.f), th = vh + (img.height - vh) * (1 - z.f);
+    const tx = cx + (img.width / 2 - cx) * (1 - z.f), ty = cy + (img.height / 2 - cy) * (1 - z.f);
+    sx = tx - tw / 2; sy = ty - th / 2; sw = tw; sh = th;
+  }
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+}
+
+function drawPhone(c, img, t) {
+  // A dark stage with the phone screen at its natural proportions, inside a simple device outline.
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#12151c");
+  g.addColorStop(1, "#1d222c");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const sh = 960, sw = img ? (img.width / img.height) * sh : 444;
+  const x = (W - sw) / 2, y = (H - sh) / 2 + 10;
+  roundRect(x - 16, y - 16, sw + 32, sh + 32, 54, "#05060a");
+  roundRect(x - 16, y - 16, sw + 32, sh + 32, 54, null, "#3a404c");
+  ctx.save();
+  roundRectPath(x, y, sw, sh, 40);
+  ctx.clip();
+  if (img) {
+    let sx = 0, sy = 0, sW = img.width, sH = img.height;
+    const z = zoomRect(c, t);
+    if (z) {
+      const r = z.r;
+      const scale = Math.min(1.5, Math.max(1, Math.min(img.width / r.w, img.height / r.h)));
+      const vw = img.width / scale, vh = img.height / scale;
+      const cx = Math.max(vw / 2, Math.min(img.width - vw / 2, r.x + r.w / 2));
+      const cy = Math.max(vh / 2, Math.min(img.height - vh / 2, r.y + r.h / 2));
+      const tw = vw + (img.width - vw) * (1 - z.f), th = vh + (img.height - vh) * (1 - z.f);
+      const tx = cx + (img.width / 2 - cx) * (1 - z.f), ty = cy + (img.height / 2 - cy) * (1 - z.f);
+      sx = tx - tw / 2; sy = ty - th / 2; sW = tw; sH = th;
+    }
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sW, sH, x, y, sw, sh);
+  }
+  ctx.restore();
+}
+
+function roundRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function roundRect(x, y, w, h, r, fill, stroke) {
+  roundRectPath(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+}
+
+function chip(text, x, y, tone, alignRight = false) {
+  ctx.font = "600 24px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  const w = ctx.measureText(text).width + 36, h = 46;
+  const left = alignRight ? x - w : x;
+  const colors = { dark: ["rgba(17,19,24,.82)", "#ffffff"], light: ["rgba(255,255,255,.12)", "#e8eaef"], cut: ["rgba(232,93,4,.92)", "#ffffff"] }[tone];
+  roundRect(left, y, w, h, 23, colors[0]);
+  ctx.fillStyle = colors[1];
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, left + 18, y + h / 2 + 1);
+}
+
+/** Who is on screen, beside a phone: name, role and what they are doing. */
+function side(s, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const x = 130, maxW = 520;
+  let y = 330;
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#e8590c";
+  ctx.font = "600 24px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  ctx.fillText((s.role ?? "").toUpperCase(), x, y);
+  y += 44;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "600 60px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  ctx.fillText(s.name ?? "", x, y);
+  y += 92;
+  ctx.fillStyle = "#aab4bf";
+  ctx.font = "500 32px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  for (const line of wrap(s.note ?? "", maxW)) (ctx.fillText(line, x, y), (y += 46));
+  ctx.restore();
+}
+function wrap(text, maxW) {
+  const lines = [];
+  let line = "";
+  for (const w of text.split(" ")) {
+    const tryLine = line ? line + " " + w : w;
+    if (ctx.measureText(tryLine).width > maxW && line) (lines.push(line), (line = w));
+    else line = tryLine;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** A title over real footage (the opening), fading in and out over its own window. */
+function titleOverlay(tt, local, alpha) {
+  if (local < tt.from || local > tt.to) return;
+  const k = Math.min(1, (local - tt.from) / 0.7, (tt.to - local) / 0.7) * alpha;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, k);
+  const g = ctx.createLinearGradient(0, 0, W * 0.75, 0);
+  g.addColorStop(0, "rgba(11,13,17,.92)");
+  g.addColorStop(0.65, "rgba(11,13,17,.78)");
+  g.addColorStop(1, "rgba(11,13,17,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "top";
+  roundRect(140, 330, 64, 64, 16, "#e8590c");
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 36px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  ctx.fillText("R", 160, 343);
+  ctx.font = "700 112px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  ctx.fillText(tt.text, 136, 420);
+  ctx.fillStyle = "#c9d1d9";
+  ctx.font = "500 44px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  ctx.fillText(tt.sub ?? "", 140, 560);
+  ctx.restore();
+}
+
+function caption(text) {
+  ctx.font = "500 34px 'IBM Plex Sans', 'Segoe UI', sans-serif";
+  const maxW = 1560;
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const tryLine = line ? line + " " + w : w;
+    if (ctx.measureText(tryLine).width > maxW && line) { lines.push(line); line = w; } else line = tryLine;
+  }
+  if (line) lines.push(line);
+  const lh = 46, padX = 30, padY = 18;
+  const boxW = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + padX * 2;
+  const boxH = lines.length * lh + padY * 2;
+  const x = (W - boxW) / 2, y = H - boxH - 44;
+  roundRect(x, y, boxW, boxH, 14, "rgba(12,14,19,.84)");
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + padY + i * lh + 4));
+  ctx.textAlign = "left";
+}
+
+main().catch((e) => { status("error " + e.message); console.error(e); });
+</script>
+</body>
+</html>

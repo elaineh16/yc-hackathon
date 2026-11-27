@@ -1,0 +1,170 @@
+{
+  "at": "2026-11-25T18:45:15.033Z",
+  "screen": "safetyScreen(): triage() over the resident's words only, re-run after each resident message",
+  "interval": "95% Wilson score interval, in percent",
+  "cases.v1.json": {
+    "cases": 99,
+    "emergencies": 23,
+    "caughtOnFirstMessage": {
+      "k": 22,
+      "n": 23,
+      "ci95": [
+        79,
+        99.2
+      ]
+    },
+    "caughtAtAnyPoint": {
+      "k": 23,
+      "n": 23,
+      "ci95": [
+        85.7,
+        100
+      ]
+    },
+    "caughtAt": {
+      "I001": 2,
+      "I002": 1,
+      "I005": 1,
+      "I007": 1,
+      "I013": 1,
+      "I020": 1,
+      "I026": 1,
+      "I027": 1,
+      "I034": 1,
+      "I040": 1,
+      "I041": 1,
+      "I046": 1,
+      "I052": 1,
+      "I067": 1,
+      "I082": 1,
+      "I083": 1,
+      "I084": 1,
+      "I085": 1,
+      "I086": 1,
+      "I087": 1,
+      "I088": 1,
+      "I089": 1,
+      "I090": 1
+    },
+    "missed": [],
+    "nonEmergencies": 76,
+    "falselyFiledAtAnyPoint": {
+      "k": 0,
+      "n": 76,
+      "ci95": [
+        0,
+        4.8
+      ]
+    },
+    "falseTriggers": {},
+    "forComparison": {
+      "caughtOverWholeConversation": 23,
+      "falselyFiledOverWholeConversation": 0
+    }
+  },
+  "heldout.v1.json": {
+    "cases": 30,
+    "emergencies": 13,
+    "caughtOnFirstMessage": {
+      "k": 8,
+      "n": 13,
+      "ci95": [
+        35.5,
+        82.3
+      ]
+    },
+    "caughtAtAnyPoint": {
+      "k": 13,
+      "n": 13,
+      "ci95": [
+        77.2,
+        100
+      ]
+    },
+    "caughtAt": {
+      "H001": 1,
+      "H004": 1,
+      "H005": 1,
+      "H007": 2,
+      "H009": 2,
+      "H011": 1,
+      "H014": 2,
+      "H016": 1,
+      "H018": 1,
+      "H020": 2,
+      "H023": 1,
+      "H025": 1,
+      "H026": 2
+    },
+    "missed": [],
+    "nonEmergencies": 17,
+    "falselyFiledAtAnyPoint": {
+      "k": 1,
+      "n": 17,
+      "ci95": [
+        1,
+        27
+      ]
+    },
+    "falseTriggers": {
+      "H003": 1
+    },
+    "forComparison": {
+      "caughtOverWholeConversation": 13,
+      "falselyFiledOverWholeConversation": 0
+    }
+  },
+  "heldout.v2.json": {
+    "cases": 30,
+    "emergencies": 13,
+    "caughtOnFirstMessage": {
+      "k": 3,
+      "n": 13,
+      "ci95": [
+        8.2,
+        50.3
+      ]
+    },
+    "caughtAtAnyPoint": {
+      "k": 7,
+      "n": 13,
+      "ci95": [
+        29.1,
+        76.8
+      ]
+    },
+    "caughtAt": {
+      "V003": 2,
+      "V005": 2,
+      "V007": 2,
+      "V009": 2,
+      "V017": 1,
+      "V023": 1,
+      "V025": 1
+    },
+    "missed": [
+      "V001",
+      "V011",
+      "V013",
+      "V015",
+      "V019",
+      "V021"
+    ],
+    "nonEmergencies": 17,
+    "falselyFiledAtAnyPoint": {
+      "k": 1,
+      "n": 17,
+      "ci95": [
+        1,
+        27
+      ]
+    },
+    "falseTriggers": {
+      "V026": 2
+    },
+    "forComparison": {
+      "caughtOverWholeConversation": 7,
+      "falselyFiledOverWholeConversation": 1
+    }
+  }
+}

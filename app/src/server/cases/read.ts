@@ -1,0 +1,583 @@
+// Read side: what each role is allowed to see, shaped for the pages (src/shared/views.ts).
+// Managers see everything on their properties. Residents never receive costs or management-only events.
+// Contractors receive only cases their vendor is on, only their own assignment, and no other vendor's activity.
+import type { Prisma } from "@prisma/client";
+import { prisma } from "wasp/server";
+import { type Actor, caseRef, type CaseStatus, CASE_STATUSES, CATEGORIES, type Category, HOLDERS, type Holder, isTrade, managerHandled, type Role, SEVERITIES, type Severity, type TriageSource } from "../../shared/domain";
+import { type Details, optionLabel, QUESTIONS } from "../../shared/intake";
+import { canPerform } from "../../shared/machine";
+import type { ActivityItem, AgentRunView, AiProposalView, AssignmentView, CaseAbilities, CaseAi, CaseDetail, CaseFilters, CaseListItem, CasePage, CommandCenter, EventView, FollowUpView, Inbox, JobBoard, JobItem, QueueItem, SlotView, UnfinishedChat, VendorOption } from "../../shared/views";
+import { REVIEW_REASONS, residentWordsOf, safetyScreen, type ReviewReason } from "../agent/intakeSafety";
+import { assertCaseAccess, managedPropertyIds, visibleCasesWhere } from "../access";
+import { approvedVendorsFor } from "../vendors/directory";
+import { discoveryQueue } from "../vendors/discovery";
+import { type ActorCtx, CASE_INCLUDE, fmtWindow, isUuid, liveAssignment, type LoadedAssignment, type LoadedCase, notFound, openSlots } from "./engine";
+
+const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+const firstName = (name: string) => name.split(" ")[0] ?? name;
+
+const LIST_INCLUDE = {
+  property: { select: { name: true, address: true } },
+  unit: { select: { label: true } },
+  resident: { select: { displayName: true } },
+  assignments: { where: { status: { in: ["OFFERED", "ACCEPTED", "COMPLETED"] } }, include: { vendor: { select: { name: true } } }, orderBy: { offeredAt: "asc" } },
+} satisfies Prisma.CaseInclude;
+type ListRow = Prisma.CaseGetPayload<{ include: typeof LIST_INCLUDE }>;
+
+/** Managers see their working next step; residents see what is happening, not the manager's internal to-do. */
+function nextActionFor(viewer: Role, holder: Holder, nextAction: string): string {
+  if (viewer !== "RESIDENT" || holder !== "MANAGER") return nextAction;
+  const finding = /^(?:Find (?:a|an) (.+?):|Add an approved (.+?) for this property)/.exec(nextAction);
+  if (finding) return `Your property manager is finding ${/^[aeiou]/i.test(finding[1] ?? finding[2]) ? "an" : "a"} ${finding[1] ?? finding[2]}`;
+  return nextAction;
+}
+
+function listItem(c: ListRow | LoadedCase, viewer: Role, now: Date): CaseListItem {
+  // Both shapes list assignments oldest first: the newest offered, accepted or completed one is the current vendor.
+  const onJob = (c.assignments as { status: string; vendor: { name: string } }[]).filter((a) => a.status === "OFFERED" || a.status === "ACCEPTED" || a.status === "COMPLETED");
+  const vendorName = onJob.at(-1)?.vendor.name ?? null;
+  const open = c.status !== "RESOLVED" && c.status !== "CANCELLED";
+  return {
+    id: c.id,
+    ref: caseRef(c.number),
+    title: c.title,
+    category: c.category,
+    severity: c.severity,
+    status: c.status,
+    holder: c.holder,
+    nextAction: nextActionFor(viewer, c.holder, c.nextAction),
+    nextActionDueAt: iso(c.nextActionDueAt),
+    overdue: open && !!c.nextActionDueAt && c.nextActionDueAt < now,
+    emergency: c.emergency,
+    needsReview: c.needsReview,
+    propertyName: c.property.name,
+    unitLabel: c.unit.label,
+    residentName: viewer === "CONTRACTOR" ? firstName(c.resident.displayName) : c.resident.displayName,
+    vendorName,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+    statusChangedAt: c.statusChangedAt.toISOString(),
+  };
+}
+
+const slotView = (s: LoadedAssignment["slots"][number]): SlotView => ({ id: s.id, startAt: s.startAt.toISOString(), endAt: s.endAt.toISOString(), status: s.status, label: fmtWindow(s.startAt, s.endAt) });
+
+function assignmentView(a: LoadedAssignment, viewer: Role): AssignmentView {
+  const money = viewer !== "RESIDENT";
+  return {
+    id: a.id,
+    vendorId: a.vendorId,
+    vendorName: a.vendor.name,
+    vendorPhone: a.vendor.phone,
+    status: a.status,
+    offeredAt: a.offeredAt.toISOString(),
+    respondByAt: a.respondByAt.toISOString(),
+    respondedAt: iso(a.respondedAt),
+    noteToVendor: viewer === "RESIDENT" ? null : a.noteToVendor,
+    declineReason: viewer === "RESIDENT" ? null : a.declineReason,
+    estimateType: money ? a.estimateType : null,
+    estimateCents: money ? a.estimateCents : null,
+    estimateNotes: money ? a.estimateNotes : null,
+    finalCostCents: money ? a.finalCostCents : null,
+    startedAt: iso(a.startedAt),
+    completedAt: iso(a.completedAt),
+    completionNotes: a.completionNotes,
+    approval:
+      money && a.approval
+        ? {
+            id: a.approval.id,
+            status: a.approval.status,
+            amountCents: a.approval.amountCents,
+            thresholdCents: a.approval.thresholdCents,
+            capCents: a.approval.capCents,
+            requestedAt: a.approval.requestedAt.toISOString(),
+            decidedAt: iso(a.approval.decidedAt),
+            note: a.approval.note,
+          }
+        : null,
+    slots: a.slots.map(slotView),
+    changeRequest:
+      viewer !== "RESIDENT" && a.changeRequestStatus && a.changeRequestCents !== null
+        ? { cents: a.changeRequestCents, reason: a.changeRequestReason ?? "", status: a.changeRequestStatus as "PENDING" | "APPROVED" | "REJECTED", requestedAt: iso(a.changeRequestedAt), decidedAt: iso(a.changeDecidedAt) }
+        : null,
+  };
+}
+
+function abilities(c: LoadedCase, actor: ActorCtx, now: Date): CaseAbilities {
+  const role = actor.kind as Role;
+  const live = liveAssignment(c);
+  const mine = role === "CONTRACTOR" && live?.vendorId === actor.vendorId ? live : null;
+  const open = openSlots(live);
+  const can = (action: Parameters<typeof canPerform>[0]) => canPerform(action, c.status, role);
+  const closeAt = c.verificationRequestedAt ? new Date(c.verificationRequestedAt.getTime() + c.property.verificationCloseAfterMinutes * 60_000) : null;
+  return {
+    reviewTriage: role === "MANAGER" && ["TRIAGED", "AWAITING_ASSIGNMENT", "REOPENED"].includes(c.status),
+    assignVendor: can("ASSIGN_VENDOR"),
+    withdrawOffer: can("WITHDRAW_OFFER"),
+    decideSpend: can("APPROVE_SPEND") && live?.approval?.status === "PENDING",
+    escalate: role === "MANAGER" && can("ESCALATE"),
+    resume: can("RESUME"),
+    markHandledOutside: can("HANDLED_OUTSIDE"),
+    closeUnverified: can("CLOSE_UNVERIFIED") && !!closeAt && now >= closeAt,
+    respondToOffer: !!mine && mine.status === "OFFERED" && now <= mine.respondByAt,
+    proposeSlots: !!mine && mine.status === "ACCEPTED" && (c.status === "SCHEDULING" || c.status === "AWAITING_APPROVAL"),
+    startWork: !!mine && can("START_WORK"),
+    addProgressNote: !!mine && (c.status === "SCHEDULED" || c.status === "IN_PROGRESS"),
+    completeWork: !!mine && can("COMPLETE_WORK"),
+    answerSlots: role === "RESIDENT" && open.length > 0 && (c.status === "SCHEDULING" || c.status === "AWAITING_APPROVAL"),
+    verify: can("VERIFY_RESOLVED"),
+    reopen: can("REOPEN"),
+    cancel: (role === "RESIDENT" || role === "MANAGER") && can("CANCEL"),
+    cancelAppointment: can("CANCEL_APPOINTMENT") && (role !== "CONTRACTOR" || !!mine),
+    requestMoreBudget: !!mine && mine.status === "ACCEPTED" && ["SCHEDULING", "SCHEDULED", "IN_PROGRESS"].includes(c.status) && mine.changeRequestStatus !== "PENDING" && (mine.approval?.status === "APPROVED" || mine.approval?.status === "AUTO_APPROVED"),
+    decideBudgetRequest: role === "MANAGER" && live?.changeRequestStatus === "PENDING",
+    handleDirectly: role === "MANAGER" && can("HANDLED_OUTSIDE") && !live && c.status !== "ESCALATED",
+    searchVendors: role === "MANAGER" && isTrade(c.category) && !c.emergency && ["AWAITING_ASSIGNMENT", "REOPENED", "TRIAGED"].includes(c.status),
+  };
+}
+
+function visibleEvent(e: { audience: string; vendorId: string | null }, actor: ActorCtx): boolean {
+  if (actor.kind === "MANAGER") return true;
+  if (actor.kind === "RESIDENT") return e.audience === "EVERYONE";
+  // Contractors: shared events that are not about another vendor, plus their own vendor's events.
+  if (e.audience === "EVERYONE") return e.vendorId === null || e.vendorId === actor.vendorId;
+  return e.audience === "VENDOR" && e.vendorId === actor.vendorId;
+}
+
+export async function caseDetail(actor: ActorCtx, caseId: unknown): Promise<CaseDetail> {
+  if (!isUuid(caseId)) throw notFound();
+  const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+  if (!c) throw notFound();
+  await assertCaseAccess(prisma, actor, c);
+  const role = actor.kind as Role;
+  const now = new Date();
+  const events = await prisma.caseEvent.findMany({ where: { caseId: c.id }, orderBy: { id: "asc" } });
+  const details = (c.details ?? {}) as Details;
+  const live = liveAssignment(c);
+  const relevant =
+    role === "CONTRACTOR"
+      ? (c.assignments.filter((a) => a.vendorId === actor.vendorId && ["OFFERED", "ACCEPTED", "COMPLETED"].includes(a.status)).at(-1) ?? null)
+      : (live ?? c.assignments.filter((a) => a.status === "COMPLETED").at(-1) ?? null);
+  const confirmed = relevant?.slots.find((s) => s.status === "CONFIRMED") ?? null;
+  const closeAt = c.verificationRequestedAt ? new Date(c.verificationRequestedAt.getTime() + c.property.verificationCloseAfterMinutes * 60_000) : null;
+  return {
+    ...listItem(c, role, now),
+    viewerRole: role,
+    channel: c.channel,
+    description: c.description,
+    summary: c.summary,
+    triageSource: c.triageSource as TriageSource,
+    triageReasons: role === "MANAGER" ? c.triageReasons : [],
+    answers: [
+      ...QUESTIONS[c.category].filter((q) => details[q.key] !== undefined).map((q) => ({ key: q.key, question: q.label, answer: optionLabel(c.category, q.key, details[q.key]), safety: !!q.safety })),
+      // Facts an agent recorded in its own words (chat and voice intake).
+      ...Object.entries(details)
+        .filter(([k]) => !QUESTIONS[c.category].some((q) => q.key === k))
+        .map(([k, v]) => ({ key: k, question: k.replace(/_/g, " ").replace(/^./, (x) => x.toUpperCase()), answer: v === true ? "Yes" : v === false ? "No" : String(v ?? ""), safety: false })),
+    ],
+    permissionToEnter: c.permissionToEnter,
+    // Entry instructions are for the vendor doing the visit: not shown on an offer it has not accepted.
+    accessNotes: role === "CONTRACTOR" && relevant?.status === "OFFERED" ? null : c.accessNotes,
+    propertyAddress: c.property.address,
+    emergencyInstructions: c.property.emergencyInstructions,
+    assignment: relevant ? assignmentView(relevant, role) : null,
+    previousAssignments: role === "MANAGER" ? c.assignments.filter((a) => a.id !== relevant?.id).map((a) => assignmentView(a, role)) : [],
+    appointment: confirmed ? slotView(confirmed) : null,
+    events: events
+      .filter((e) => visibleEvent(e, actor))
+      .map((e): EventView => {
+        // Contractors get the resident's first name only, in the history as everywhere else.
+        const hide = (s: string) => (role === "CONTRACTOR" ? s.split(c.resident.displayName).join(firstName(c.resident.displayName)) : s);
+        return { id: e.id, at: e.createdAt.toISOString(), actorRole: e.actorRole as Actor, actorName: hide(e.actorName), type: e.type, message: hide(e.message), fromStatus: e.fromStatus, toStatus: e.toStatus, audience: e.audience };
+      }),
+    resolution: c.resolution,
+    resolvedAt: iso(c.resolvedAt),
+    cancelledAt: iso(c.cancelledAt),
+    cancelReason: c.cancelReason,
+    verification: { requestedAt: iso(c.verificationRequestedAt), reminders: c.verificationReminders, managerMayCloseAt: role === "MANAGER" ? iso(closeAt) : null },
+    policy: { approvalThresholdCents: role === "RESIDENT" ? 0 : c.property.approvalThresholdCents },
+    can: abilities(c, actor, now),
+    ai: role === "MANAGER" ? await caseAi(c) : null,
+    observations: role === "CONTRACTOR" ? [] : c.observations,
+    assumptions: role === "MANAGER" ? c.assumptions : [],
+    openQuestions: role === "MANAGER" ? c.openQuestions : [],
+    related:
+      c.intakeGroup && role !== "CONTRACTOR"
+        ? (await prisma.case.findMany({ where: { intakeGroup: c.intakeGroup, id: { not: c.id }, residentId: c.residentId, propertyId: c.propertyId }, select: { id: true, number: true, title: true, status: true } })).map((r) => ({ id: r.id, ref: caseRef(r.number), title: r.title, status: r.status }))
+        : [],
+    followUps: role === "MANAGER" ? await followUps(c.id) : null,
+  };
+}
+
+/** Every notification on the case, per person and channel, with its real delivery state. */
+async function followUps(caseId: string): Promise<FollowUpView[]> {
+  const rows = await prisma.notification.findMany({ where: { caseId }, orderBy: { createdAt: "desc" }, take: 60, include: { user: { select: { displayName: true, role: true } } } });
+  return rows.map((n) => ({
+    id: n.id,
+    at: n.createdAt.toISOString(),
+    recipient: n.user.displayName,
+    role: n.user.role as Role,
+    eventType: n.eventType,
+    channel: n.channel,
+    status: n.status,
+    statusNote: n.statusNote,
+    title: n.title,
+    sentAt: iso(n.sentAt),
+    readAt: iso(n.readAt),
+    acknowledgedAt: iso(n.acknowledgedAt),
+    ackDueAt: iso(n.ackDueAt),
+    attempts: n.attempts,
+    lastError: n.lastError,
+  }));
+}
+
+// ───────── AI layer (managers) ─────────
+type ProposalRow = { id: string; kind: string; status: string; payload: unknown; rationale: string; policyNote: string; outcome: string | null; createdAt: Date; decidedAt: Date | null };
+export function proposalView(p: ProposalRow): AiProposalView {
+  const payload = (p.payload ?? {}) as { vendorName?: string; message?: string; reason?: string };
+  const summary =
+    p.kind === "ASSIGN_VENDOR" ? `Offer the job to ${payload.vendorName ?? "a vendor"}` : p.kind === "MESSAGE_RESIDENT" ? "Send the resident an update" : `Escalate: ${payload.reason ?? ""}`;
+  return {
+    id: p.id,
+    kind: p.kind as AiProposalView["kind"],
+    status: p.status as AiProposalView["status"],
+    summary,
+    vendorName: payload.vendorName ?? null,
+    message: payload.message ?? null,
+    rationale: p.rationale,
+    policyNote: p.policyNote,
+    outcome: p.outcome,
+    createdAt: p.createdAt.toISOString(),
+    decidedAt: iso(p.decidedAt),
+  };
+}
+
+function stepSummary(s: { tool: string; args?: unknown; ok: boolean; result?: unknown }): string {
+  const args = (s.args && typeof s.args === "object" ? s.args : {}) as Record<string, unknown>;
+  const r = (s.result && typeof s.result === "object" ? s.result : {}) as Record<string, unknown>;
+  const q = typeof args.query === "string" ? `"${args.query.slice(0, 60)}"` : "";
+  if (!s.ok) return `${s.tool}: ${String(r.error ?? "failed").slice(0, 160)}`;
+  switch (s.tool) {
+    case "get_case":
+      return "Read the case";
+    case "list_vendors":
+      return `Listed ${Array.isArray(r.vendors) ? r.vendors.length : 0} eligible vendors`;
+    case "search_building_notes":
+    case "lookup_building_notes":
+      return `Searched the building notes for ${q} (${Array.isArray(r.notes) ? r.notes.length : 0} found)`;
+    case "search_past_cases":
+      return `Searched past cases for ${q} (${Array.isArray(r.cases) ? r.cases.length : 0} found)`;
+    case "find_my_recent_reports":
+      return `Checked the resident's recent reports (${Array.isArray(r.reports) ? r.reports.length : 0})`;
+    case "note_facts":
+      return `Noted: ${Array.isArray(r.recorded) ? r.recorded.join(", ") : "facts"}`;
+    case "record_assessment":
+      return "Recorded an assessment";
+    case "submit_report":
+      return `Submitted the report as ${String(r.ref ?? "")}${Array.isArray(r.also_filed) && r.also_filed.length ? ` (and ${r.also_filed.join(", ")})` : ""}`;
+    case "reopen_my_report":
+      return `Reopened ${String(r.ref ?? "")}`;
+    case "list_discovery_candidates":
+      return `Read ${Array.isArray(r.businesses) ? r.businesses.length : 0} discovered businesses`;
+    case "request_vendor_discovery":
+      return String(r.message ?? "Asked for a vendor search");
+    case "note_candidate":
+      return "Left a note on a discovered business";
+    case "policy:vendor_coverage":
+      return String(r.message ?? "Checked vendor coverage");
+    default:
+      return String(r.message ?? s.tool).slice(0, 160);
+  }
+}
+
+async function caseAi(c: LoadedCase): Promise<CaseAi> {
+  const [proposals, runs] = await Promise.all([
+    prisma.agentProposal.findMany({ where: { caseId: c.id }, orderBy: { createdAt: "desc" }, take: 12 }),
+    prisma.agentRun.findMany({ where: { caseId: c.id }, orderBy: { createdAt: "desc" }, take: 6 }),
+  ]);
+  return {
+    assessment: c.aiAssessment,
+    assessedAt: iso(c.aiAssessedAt),
+    pending: c.agentPendingSince !== null || runs.some((r) => r.status === "RUNNING"),
+    // A proposal left pending on a case closed before proposals closed with their case is shown as what it is now.
+    proposals: proposals.map((p) => proposalView(p.status === "PENDING" && (c.status === "RESOLVED" || c.status === "CANCELLED") ? { ...p, status: "SUPERSEDED", outcome: "Not acted on before the case closed." } : p)),
+    runs: runs.map(
+      (r): AgentRunView => ({
+        id: r.id,
+        kind: r.kind,
+        trigger: r.trigger,
+        status: r.status,
+        model: r.model,
+        createdAt: r.createdAt.toISOString(),
+        durationMs: r.durationMs,
+        error: r.error,
+        finalText: r.finalText,
+        steps: (Array.isArray(r.steps) ? (r.steps as { tool: string; args?: unknown; ok: boolean; result?: unknown }[]) : []).map((s) => ({ tool: s.tool, ok: s.ok, summary: stepSummary(s) })),
+      }),
+    ),
+  };
+}
+
+const pick = <T extends string>(values: unknown, allowed: readonly T[]): T[] => (Array.isArray(values) ? (values.filter((v) => (allowed as readonly unknown[]).includes(v)) as T[]) : []);
+
+export async function listCases(actor: ActorCtx, raw: CaseFilters | undefined): Promise<CasePage> {
+  const f = raw ?? {};
+  const now = new Date();
+  const where: Prisma.CaseWhereInput = { AND: [await visibleCasesWhere(prisma, actor)] };
+  const and = where.AND as Prisma.CaseWhereInput[];
+  const status = pick<CaseStatus>(f.status, CASE_STATUSES);
+  const category = pick<Category>(f.category, CATEGORIES);
+  const severity = pick<Severity>(f.severity, SEVERITIES);
+  const holder = pick<Holder>(f.holder, HOLDERS);
+  if (status.length) and.push({ status: { in: status } });
+  if (category.length) and.push({ category: { in: category } });
+  if (severity.length) and.push({ severity: { in: severity } });
+  if (holder.length) and.push({ holder: { in: holder } });
+  if (f.open === true) and.push({ status: { notIn: ["RESOLVED", "CANCELLED"] } });
+  if (f.open === false) and.push({ status: { in: ["RESOLVED", "CANCELLED"] } });
+  const q = typeof f.q === "string" ? f.q.trim().slice(0, 80) : "";
+  if (q) {
+    const number = /^(?:rly-?)?0*(\d{1,9})$/i.exec(q)?.[1];
+    and.push({
+      OR: [
+        ...(number ? [{ number: Number(number) }] : []),
+        { title: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } },
+        { unit: { label: { contains: q, mode: "insensitive" } } },
+        { resident: { displayName: { contains: q, mode: "insensitive" } } },
+        { assignments: { some: { vendor: { name: { contains: q, mode: "insensitive" } } } } },
+      ],
+    });
+  }
+  const pageSize = Math.min(Math.max(Number(f.pageSize) || 25, 1), 100);
+  const page = Math.max(Number(f.page) || 1, 1);
+  const orderBy: Prisma.CaseOrderByWithRelationInput[] =
+    f.sort === "created" ? [{ createdAt: "desc" }] : f.sort === "severity" ? [{ severity: "asc" }, { statusChangedAt: "asc" }] : f.sort === "due" ? [{ nextActionDueAt: { sort: "asc", nulls: "last" } }] : [{ updatedAt: "desc" }];
+  const [rows, total] = await Promise.all([prisma.case.findMany({ where, include: LIST_INCLUDE, orderBy, skip: (page - 1) * pageSize, take: pageSize }), prisma.case.count({ where })]);
+  return { items: rows.map((r) => listItem(r, actor.kind as Role, now)), total, page, pageSize };
+}
+
+/** Why a case is in the human-intervention queue, in a few words. */
+function whyHuman(c: ListRow, now: Date): string {
+  if (c.status === "ESCALATED") return "Escalated: a person must handle it";
+  if (c.emergency) return "Possible emergency";
+  if (c.nextActionDueAt && c.nextActionDueAt < now) return `Overdue: ${c.nextAction.toLowerCase()}`;
+  if (c.status === "TRIAGED") return "Needs a person to classify and route it";
+  if (c.status === "AWAITING_APPROVAL") return "Estimate waiting for approval";
+  if (c.status === "REOPENED") return "Resident says it is not fixed";
+  return c.nextAction;
+}
+
+/** Chat and call reports waiting for a manager because the assistant did not finish them (agent/intakeSafety.ts). */
+async function unfinishedChats(propertyIds: string[]): Promise<UnfinishedChat[]> {
+  const units = await prisma.unit.findMany({ where: { propertyId: { in: propertyIds } }, select: { id: true, label: true, property: { select: { name: true } } } });
+  if (!units.length) return [];
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const rows = await prisma.intakeConversation.findMany({
+    where: { unitId: { in: units.map((u) => u.id) }, reviewSince: { not: null }, reviewOutcome: null, caseId: null },
+    orderBy: { reviewSince: "asc" },
+    take: 20,
+    include: { resident: { select: { displayName: true } } },
+  });
+  return rows.map((c) => {
+    const words = residentWordsOf(c.messages);
+    const u = byId.get(c.unitId);
+    const reason: ReviewReason = c.reviewReason === "assistant_failed" || c.reviewReason === "call_ended" ? c.reviewReason : "unfinished";
+    return {
+      id: c.id,
+      channel: c.channel === "VOICE" ? "VOICE" : "CHAT",
+      residentName: c.resident.displayName,
+      unitLabel: u?.label ?? "",
+      propertyName: u?.property.name ?? "",
+      reason,
+      reasonText: REVIEW_REASONS[reason],
+      since: c.reviewSince!.toISOString(),
+      words: words.length > 600 ? `${words.slice(0, 597)}…` : words,
+      urgent: safetyScreen(words).severity !== "ROUTINE",
+    };
+  });
+}
+
+export async function commandCenter(actor: ActorCtx): Promise<CommandCenter> {
+  const now = new Date();
+  const day = new Date(now.getTime() - 24 * 3600_000);
+  const month = new Date(now.getTime() - 30 * 24 * 3600_000);
+  const propertyIds = await managedPropertyIds(prisma, actor.userId!);
+  const mine: Prisma.CaseWhereInput = { propertyId: { in: propertyIds } };
+  const open: Prisma.CaseWhereInput = { ...mine, status: { notIn: ["RESOLVED", "CANCELLED"] } };
+  const pressing: Prisma.CaseWhereInput = { ...open, OR: [{ status: "ESCALATED" }, { severity: "EMERGENCY" }, { nextActionDueAt: { lt: now } }] };
+  const order: Prisma.CaseOrderByWithRelationInput[] = [{ severity: "asc" }, { statusChangedAt: "asc" }];
+  const by = (holder: Holder) => prisma.case.findMany({ where: { ...open, holder }, include: LIST_INCLUDE, orderBy: order, take: 8 });
+  const [openCount, emergencies, overdue, resolvedThisWeek, nManager, nContractor, nResident, attention, onManager, onContractors, onResidents, events, suggestions] = await Promise.all([
+    prisma.case.count({ where: open }),
+    prisma.case.count({ where: { ...open, OR: [{ status: "ESCALATED" }, { severity: "EMERGENCY" }] } }),
+    prisma.case.count({ where: { ...open, nextActionDueAt: { lt: now } } }),
+    prisma.case.count({ where: { ...mine, status: "RESOLVED", resolvedAt: { gte: new Date(now.getTime() - 7 * 24 * 3600_000) } } }),
+    prisma.case.count({ where: { ...open, holder: "MANAGER" } }),
+    prisma.case.count({ where: { ...open, holder: "CONTRACTOR" } }),
+    prisma.case.count({ where: { ...open, holder: "RESIDENT" } }),
+    prisma.case.findMany({ where: pressing, include: LIST_INCLUDE, orderBy: order, take: 8 }),
+    by("MANAGER"),
+    by("CONTRACTOR"),
+    by("RESIDENT"),
+    prisma.caseEvent.findMany({ where: { case: mine }, orderBy: { id: "desc" }, take: 14, include: { case: { select: { number: true, title: true } } } }),
+    prisma.agentProposal.findMany({ where: { status: "PENDING", case: open }, orderBy: { createdAt: "desc" }, take: 10, include: { case: { select: { number: true, title: true } } } }),
+  ]);
+  const [humanRows, resolved30, proposals30, runs24, overdueAckRows, emailGroups, disc] = await Promise.all([
+    prisma.case.findMany({ where: { ...open, holder: "MANAGER" }, include: LIST_INCLUDE, orderBy: [{ severity: "asc" }, { nextActionDueAt: { sort: "asc", nulls: "last" } }, { statusChangedAt: "asc" }], take: 12 }),
+    prisma.case.findMany({ where: { ...mine, status: "RESOLVED", resolvedAt: { gte: month } }, select: { createdAt: true, resolvedAt: true } }),
+    prisma.agentProposal.groupBy({ by: ["status"], where: { createdAt: { gte: month }, case: mine }, _count: true }),
+    prisma.agentRun.findMany({ where: { kind: "COORDINATOR", createdAt: { gte: day }, case: mine }, orderBy: { createdAt: "desc" }, take: 40, include: { case: { select: { number: true } } } }),
+    prisma.notification.findMany({ where: { channel: "IN_APP", ackRequired: true, acknowledgedAt: null, ackDueAt: { lt: now }, case: open }, orderBy: { ackDueAt: "asc" }, take: 12, include: { user: { select: { displayName: true, role: true } }, case: { select: { number: true } } } }),
+    prisma.notification.groupBy({ by: ["status"], where: { channel: "EMAIL", createdAt: { gte: day }, OR: [{ case: mine }, { caseId: null, userId: actor.userId! }] }, _count: true }),
+    discoveryQueue(propertyIds),
+  ]);
+  const item = (r: ListRow) => listItem(r, "MANAGER", now);
+  const hours = resolved30.map((c) => (c.resolvedAt!.getTime() - c.createdAt.getTime()) / 3600_000).sort((a, b) => a - b);
+  const median = hours.length ? (hours.length % 2 ? hours[(hours.length - 1) / 2] : (hours[hours.length / 2 - 1] + hours[hours.length / 2]) / 2) : null;
+  const pc = (st: string) => proposals30.find((g) => g.status === st)?._count ?? 0;
+  const ec = (st: string) => emailGroups.find((g) => g.status === st)?._count ?? 0;
+  const runSummary = (r: (typeof runs24)[number]) => {
+    const steps = Array.isArray(r.steps) ? (r.steps as { tool: string; args?: unknown; ok: boolean; result?: unknown }[]) : [];
+    const acts = steps.filter((st) => st.ok && ["propose_vendor", "propose_resident_update", "recommend_escalation", "request_vendor_discovery", "note_candidate", "policy:vendor_coverage"].includes(st.tool)).map(stepSummary);
+    if (r.status === "SKIPPED") return `Skipped: ${r.error ?? "model unavailable"}`;
+    if (r.status === "FAILED") return `Failed: ${r.error ?? "error"}`;
+    if (r.status === "RUNNING") return "Reviewing now";
+    return acts.length ? acts.join(" · ") : r.finalText?.slice(0, 140) || "Reviewed; no action needed";
+  };
+  const toReview = disc.candidates.map((g) => ({ trade: g.trade as Category, status: g.status as string, count: g._count }));
+  return {
+    counts: {
+      open: openCount,
+      emergencies,
+      waitingOnManager: nManager,
+      waitingOnContractors: nContractor,
+      waitingOnResidents: nResident,
+      overdue,
+      resolvedThisWeek,
+      suggestions: suggestions.length,
+      discovery: disc.waiting.length + disc.failed.length + toReview.reduce((n, g) => n + g.count, 0),
+      overdueAcks: overdueAckRows.length,
+    },
+    metrics: {
+      resolvedLast30: resolved30.length,
+      medianHoursToResolve: median === null ? null : Math.round(median * 10) / 10,
+      aiProposalsLast30: proposals30.reduce((n, g) => n + g._count, 0),
+      aiAcceptedLast30: pc("EXECUTED") + pc("ACCEPTED"),
+      aiRejectedLast30: pc("REJECTED"),
+      coordinatorRunsLast24h: runs24.length,
+      coordinatorFailedLast24h: runs24.filter((r) => r.status === "FAILED").length,
+      emailsLast24h: { captured: ec("CAPTURED"), accepted: ec("ACCEPTED"), skipped: ec("SKIPPED"), failed: ec("FAILED"), pending: ec("PENDING") + ec("SENDING") },
+    },
+    humanQueue: humanRows.map((r): QueueItem => ({ ...item(r), why: whyHuman(r, now) })),
+    discovery: {
+      searches: [...disc.waiting, ...disc.failed].map((d) => ({ id: d.id, status: d.status, caseId: d.case?.id ?? null, caseRef: d.case ? caseRef(d.case.number) : null, caseTitle: d.case?.title ?? null, trade: d.trade, query: d.query, error: d.errorMessage, at: d.createdAt.toISOString() })),
+      toReview,
+    },
+    overdueAcks: overdueAckRows.map((n) => ({ id: n.id, caseId: n.caseId, caseRef: n.case ? caseRef(n.case.number) : null, recipient: n.user.displayName, role: n.user.role as Role, title: n.title, dueAt: n.ackDueAt!.toISOString() })),
+    aiRuns: runs24.slice(0, 10).map((r) => ({ id: r.id, caseId: r.caseId!, caseRef: r.case ? caseRef(r.case.number) : "", trigger: r.trigger, status: r.status, durationMs: r.durationMs, at: r.createdAt.toISOString(), summary: runSummary(r) })),
+    suggestions: suggestions.map((p) => ({ ...proposalView(p), caseId: p.caseId, caseRef: caseRef(p.case.number), caseTitle: p.case.title })),
+    unfinishedChats: await unfinishedChats(propertyIds),
+    attention: attention.map(item),
+    waitingOnManager: onManager.map(item),
+    waitingOnContractors: onContractors.map(item),
+    waitingOnResidents: onResidents.map(item),
+    recent: events.map(
+      (e): ActivityItem => ({
+        id: e.id,
+        at: e.createdAt.toISOString(),
+        actorRole: e.actorRole as Actor,
+        actorName: e.actorName,
+        type: e.type,
+        message: e.message,
+        fromStatus: e.fromStatus,
+        toStatus: e.toStatus,
+        audience: e.audience,
+        caseId: e.caseId,
+        caseRef: caseRef(e.case.number),
+        caseTitle: e.case.title,
+      }),
+    ),
+    generatedAt: now.toISOString(),
+  };
+}
+
+/** Approved vendors for this case's trade, with enough context for the manager to choose. */
+export async function eligibleVendors(actor: ActorCtx, caseId: unknown): Promise<VendorOption[]> {
+  if (!isUuid(caseId)) throw notFound();
+  const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+  if (!c) throw notFound();
+  await assertCaseAccess(prisma, actor, c);
+  // Only vendors approved at this case's property, for its trade (managerHandled categories have none).
+  const vendors = managerHandled(c.category) ? [] : await approvedVendorsFor(prisma, c.propertyId, c.category);
+  const before = new Set(c.assignments.filter((a) => ["DECLINED", "EXPIRED", "WITHDRAWN", "REJECTED"].includes(a.status)).map((a) => a.vendorId));
+  return vendors.map((v) => ({ id: v.id, name: v.name, trades: v.trades, phone: v.phone, openJobs: v.assignments.filter((a) => a.status === "OFFERED" || a.status === "ACCEPTED").length, hasLogin: v._count.users > 0, previouslyOnCase: before.has(v.id) }));
+}
+
+export async function jobBoard(actor: ActorCtx): Promise<JobBoard> {
+  const board: JobBoard = { offers: [], active: [], done: [] };
+  if (!actor.vendorId) return board;
+  const now = new Date();
+  const rows = await prisma.vendorAssignment.findMany({
+    where: { vendorId: actor.vendorId, status: { in: ["OFFERED", "ACCEPTED", "COMPLETED"] } },
+    include: { approval: true, slots: { orderBy: { startAt: "asc" } }, case: { include: LIST_INCLUDE } },
+    orderBy: { offeredAt: "desc" },
+    take: 100,
+  });
+  for (const a of rows) {
+    const confirmed = a.slots.find((s) => s.status === "CONFIRMED");
+    const job: JobItem = {
+      ...listItem(a.case, "CONTRACTOR", now),
+      assignmentId: a.id,
+      assignmentStatus: a.status,
+      respondByAt: a.respondByAt.toISOString(),
+      estimateCents: a.estimateCents,
+      approvalStatus: a.approval?.status ?? null,
+      appointment: confirmed ? slotView(confirmed) : null,
+      propertyAddress: a.case.property.address,
+    };
+    if (a.status === "OFFERED") board.offers.push(job);
+    else if (a.status === "ACCEPTED") board.active.push(job);
+    else board.done.push(job);
+  }
+  return board;
+}
+
+export async function inbox(actor: ActorCtx): Promise<Inbox> {
+  const now = new Date();
+  const [rows, unread] = await Promise.all([
+    prisma.notification.findMany({ where: { userId: actor.userId!, channel: "IN_APP" }, orderBy: { createdAt: "desc" }, take: 40 }),
+    prisma.notification.count({ where: { userId: actor.userId!, channel: "IN_APP", readAt: null } }),
+  ]);
+  return {
+    items: rows.map((n) => ({
+      id: n.id,
+      at: n.createdAt.toISOString(),
+      kind: n.kind,
+      eventType: n.eventType,
+      title: n.title,
+      body: n.body,
+      caseId: n.caseId,
+      read: n.readAt !== null,
+      ackRequired: n.ackRequired,
+      ackDueAt: iso(n.ackDueAt),
+      acknowledged: n.acknowledgedAt !== null,
+      overdue: n.ackRequired && n.acknowledgedAt === null && !!n.ackDueAt && n.ackDueAt < now,
+    })),
+    unread,
+  };
+}
+
+export async function markRead(actor: ActorCtx, ids?: string[]) {
+  const where = { userId: actor.userId!, channel: "IN_APP" as const, readAt: null, ...(Array.isArray(ids) && ids.length ? { id: { in: ids.filter(isUuid) } } : {}) };
+  const r = await prisma.notification.updateMany({ where, data: { readAt: new Date() } });
+  return { marked: r.count };
+}
+
+/** The recipient acknowledges a notification ("Got it"). Only their own, only in-app. */
+export async function acknowledge(actor: ActorCtx, id: unknown) {
+  if (!isUuid(id)) throw notFound();
+  const r = await prisma.notification.updateMany({ where: { id, userId: actor.userId!, channel: "IN_APP" }, data: { acknowledgedAt: new Date(), readAt: new Date() } });
+  if (r.count === 0) throw notFound();
+  return { ok: true };
+}

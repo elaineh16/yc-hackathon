@@ -1,0 +1,110 @@
+{
+  "label": "before",
+  "at": "2026-11-25T18:35:53.782Z",
+  "waitedMs": 60000,
+  "definition": "a case for the resident or a manager notification appeared after the message",
+  "summary": {
+    "all": {
+      "reached": 0,
+      "of": 8
+    },
+    "hazard": {
+      "reached": 0,
+      "of": 4
+    },
+    "nonHazard": {
+      "reached": 0,
+      "of": 4
+    },
+    "offline": {
+      "reached": 0,
+      "of": 4
+    },
+    "error": {
+      "reached": 0,
+      "of": 4
+    }
+  },
+  "rows": [
+    {
+      "scenario": "H1",
+      "mode": "offline",
+      "hazard": true,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved. You can send this report with the form instead, which works without the assistant, and a person will read it.",
+      "caseRef": null
+    },
+    {
+      "scenario": "H1",
+      "mode": "error",
+      "hazard": true,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved. You can try again, or send it with the form.",
+      "caseRef": null
+    },
+    {
+      "scenario": "H2",
+      "mode": "offline",
+      "hazard": true,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved. You can send this report with the form instead, which works without the assistant, and a person will read it.",
+      "caseRef": null
+    },
+    {
+      "scenario": "H2",
+      "mode": "error",
+      "hazard": true,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved. You can try again, or send it with the form.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N1",
+      "mode": "offline",
+      "hazard": false,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved. You can send this report with the form instead, which works without the assistant, and a person will read it.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N1",
+      "mode": "error",
+      "hazard": false,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved. You can try again, or send it with the form.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N2",
+      "mode": "offline",
+      "hazard": false,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved. You can send this report with the form instead, which works without the assistant, and a person will read it.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N2",
+      "mode": "error",
+      "hazard": false,
+      "reached": false,
+      "how": null,
+      "ms": null,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved. You can try again, or send it with the form.",
+      "caseRef": null
+    }
+  ]
+}

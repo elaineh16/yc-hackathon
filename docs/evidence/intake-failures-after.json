@@ -1,0 +1,110 @@
+{
+  "label": "after",
+  "at": "2026-11-25T21:40:18.861Z",
+  "waitedMs": 60000,
+  "definition": "a case for the resident or a manager notification appeared after the message",
+  "summary": {
+    "all": {
+      "reached": 8,
+      "of": 8
+    },
+    "hazard": {
+      "reached": 4,
+      "of": 4
+    },
+    "nonHazard": {
+      "reached": 4,
+      "of": 4
+    },
+    "offline": {
+      "reached": 4,
+      "of": 4
+    },
+    "error": {
+      "reached": 4,
+      "of": 4
+    }
+  },
+  "rows": [
+    {
+      "scenario": "H1",
+      "mode": "offline",
+      "hazard": true,
+      "reached": true,
+      "how": "case",
+      "ms": 17,
+      "residentReply": "This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. Your report is saved as RLY-0907. Leave the unit now. Do not use switches or flames. Call your gas utility's emergency line or 911 from outside. The property manager has been alerted in Relay. It is being handled as an emergency, not as a routine repair.",
+      "caseRef": "RLY-0907"
+    },
+    {
+      "scenario": "H1",
+      "mode": "error",
+      "hazard": true,
+      "reached": true,
+      "how": "case",
+      "ms": 17,
+      "residentReply": "This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. Your report is saved as RLY-0908. Leave the unit now. Do not use switches or flames. Call your gas utility's emergency line or 911 from outside. The property manager has been alerted in Relay. It is being handled as an emergency, not as a routine repair.",
+      "caseRef": "RLY-0908"
+    },
+    {
+      "scenario": "H2",
+      "mode": "offline",
+      "hazard": true,
+      "reached": true,
+      "how": "case",
+      "ms": 17,
+      "residentReply": "This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. Your report is saved as RLY-0909. If there is fire or smoke, get everyone out and call 911. Do not use the appliance or the outlet. The property manager has been alerted in Relay. It is being handled as an emergency, not as a routine repair.",
+      "caseRef": "RLY-0909"
+    },
+    {
+      "scenario": "H2",
+      "mode": "error",
+      "hazard": true,
+      "reached": true,
+      "how": "case",
+      "ms": 14,
+      "residentReply": "This could be dangerous, so I've passed it to your property manager straight away instead of asking more questions. Your report is saved as RLY-0910. If there is fire or smoke, get everyone out and call 911. Do not use the appliance or the outlet. The property manager has been alerted in Relay. It is being handled as an emergency, not as a routine repair.",
+      "caseRef": "RLY-0910"
+    },
+    {
+      "scenario": "N1",
+      "mode": "offline",
+      "hazard": false,
+      "reached": true,
+      "how": "manager notification: Unfinished chat report: Priya Nair, unit 4B",
+      "ms": 1071,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which works without the assistant.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N1",
+      "mode": "error",
+      "hazard": false,
+      "reached": true,
+      "how": "manager notification: Unfinished chat report: Priya Nair, unit 4B",
+      "ms": 14025,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved, and I've passed it to your property manager so a person reads it. You can try again, or send it with the form.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N2",
+      "mode": "offline",
+      "hazard": false,
+      "reached": true,
+      "how": "manager notification: Unfinished chat report: Daniel Osei, unit 2B",
+      "ms": 1856,
+      "residentReply": "I can't reply right now: Relay's AI assistant is offline. Your message is saved, and I've passed it to your property manager so a person reads it. You can also send the report with the form, which works without the assistant.",
+      "caseRef": null
+    },
+    {
+      "scenario": "N2",
+      "mode": "error",
+      "hazard": false,
+      "reached": true,
+      "how": "manager notification: Unfinished chat report: Daniel Osei, unit 2B",
+      "ms": 13730,
+      "residentReply": "Sorry, something went wrong on our side and I could not reply. Your message is saved, and I've passed it to your property manager so a person reads it. You can try again, or send it with the form.",
+      "caseRef": null
+    }
+  ]
+}

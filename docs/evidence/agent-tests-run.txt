@@ -1,0 +1,23 @@
+# Agents on the real model (qwen2.5:3b via Ollama, CPU), 2026-11-23 17:27:23 EST
+$ npx tsx --test --test-concurrency=1 tests/api/agent.test.ts
+▶ intake agent
+  ✔ converses in natural language, then files the case only through the server (158627.649652ms)
+  ℹ relay: The kitchen sink is leaking and dripping slowly. Is this happening right now?
+  ℹ relay: Got it. The water is not reaching any outlets, light fittings, or the electrical panel. Have you been able to turn off the water at the fixture?
+  ℹ relay: Your report is saved as RLY-0605. Keep away from the wet area and do not touch switches or outlets near it. If it is safe, turn off the breaker for that area. The property manager has been alerted in 
+  ℹ filed RLY-0605: Kitchen Sink Leaking (EMERGENCY); facts: Where is the problem?=kitchen sink; Leaking now=Yes
+✔ intake agent (159521.745769ms)
+▶ coordinator
+  ✔ wakes on the new case, reads it through tools, and every proposal passes policy (55574.211015ms)
+  ℹ run SUCCEEDED after ESCALATED in 51 s: Read the case | Already escalated. | Recorded an assessment
+  ℹ assessment: The kitchen sink is leaking into the cabinet, dripping into the unit and potentially reaching electrical components. The case has been escalated to the property manager due to safety concerns. Next steps will be handled by Relay's manager.
+  ℹ the model recorded an assessment without proposing a vendor this time
+✔ coordinator (55575.554453ms)
+ℹ tests 2
+ℹ suites 2
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 215951.241418

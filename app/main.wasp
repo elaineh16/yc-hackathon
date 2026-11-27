@@ -1,0 +1,184 @@
+app relay {
+  wasp: {
+    version: "^0.22.0"
+  },
+  title: "Relay",
+  head: [
+    "<link rel='icon' href='/favicon.ico' />",
+    "<link rel='preconnect' href='https://fonts.googleapis.com' />",
+    "<link href='https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap' rel='stylesheet' />",
+  ],
+  auth: {
+    userEntity: User,
+    methods: {
+      usernameAndPassword: {}
+    },
+    // Accounts are provisioned by the property (seed or settings). Nobody can sign up and pick a role.
+    onBeforeSignup: import { blockSelfSignup } from "@src/server/http",
+    onAuthFailedRedirectTo: "/login",
+    onAuthSucceededRedirectTo: "/"
+  },
+  client: {
+    rootComponent: import { App } from "@src/client/App"
+  },
+  server: {
+    setupFn: import { serverSetup } from "@src/server/http",
+    middlewareConfigFn: import { serverMiddleware } from "@src/server/limits"
+  },
+  db: {
+    seeds: [
+      import { seedDemo } from "@src/server/seed"
+    ]
+  }
+}
+
+// ───────────────────────── pages ─────────────────────────
+route LoginRoute { path: "/login", to: LoginPage }
+page LoginPage { component: import { LoginPage } from "@src/client/pages/LoginPage" }
+
+route HomeRoute { path: "/", to: HomePage }
+page HomePage { authRequired: true, component: import { HomePage } from "@src/client/pages/HomePage" }
+
+// Resident portal
+route MyCasesRoute { path: "/my", to: MyCasesPage }
+page MyCasesPage { authRequired: true, component: import { MyCasesPage } from "@src/client/pages/resident/MyCasesPage" }
+route ReportRoute { path: "/my/report", to: ReportPage }
+page ReportPage { authRequired: true, component: import { ReportPage } from "@src/client/pages/resident/ReportPage" }
+route MyCaseRoute { path: "/my/cases/:caseId", to: MyCasePage }
+page MyCasePage { authRequired: true, component: import { MyCasePage } from "@src/client/pages/resident/MyCasePage" }
+
+// Manager workspace
+route CommandRoute { path: "/ops", to: CommandCenterPage }
+page CommandCenterPage { authRequired: true, component: import { CommandCenterPage } from "@src/client/pages/manager/CommandCenterPage" }
+route InboxRoute { path: "/ops/cases", to: CaseInboxPage }
+page CaseInboxPage { authRequired: true, component: import { CaseInboxPage } from "@src/client/pages/manager/CaseInboxPage" }
+route CaseRoute { path: "/ops/cases/:caseId", to: CaseDetailPage }
+page CaseDetailPage { authRequired: true, component: import { CaseDetailPage } from "@src/client/pages/manager/CaseDetailPage" }
+route VendorsRoute { path: "/ops/vendors", to: VendorsPage }
+page VendorsPage { authRequired: true, component: import { VendorsPage } from "@src/client/pages/manager/VendorsPage" }
+route SettingsRoute { path: "/ops/settings", to: SettingsPage }
+page SettingsPage { authRequired: true, component: import { SettingsPage } from "@src/client/pages/manager/SettingsPage" }
+
+// Contractor workspace
+route JobsRoute { path: "/jobs", to: JobsPage }
+page JobsPage { authRequired: true, component: import { JobsPage } from "@src/client/pages/contractor/JobsPage" }
+route JobRoute { path: "/jobs/:caseId", to: JobPage }
+page JobPage { authRequired: true, component: import { JobPage } from "@src/client/pages/contractor/JobPage" }
+
+// ───────────────────────── queries ─────────────────────────
+query getMe { fn: import { getMe } from "@src/server/ops", entities: [User] }
+query getAiStatus { fn: import { getAiStatus } from "@src/server/ops", entities: [] }
+query getCase { fn: import { getCase } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, AppointmentSlot, SpendApproval, AgentProposal, AgentRun, Notification] }
+query getNotifications { fn: import { getNotifications } from "@src/server/ops", entities: [Notification] }
+query getMyCases { fn: import { getMyCases } from "@src/server/ops", entities: [Case, VendorAssignment] }
+query getIntakeConversation { fn: import { getIntakeConversation } from "@src/server/ops", entities: [IntakeConversation] }
+query getCommandCenter { fn: import { getCommandCenter } from "@src/server/ops", entities: [Case, CaseEvent, AgentProposal, AgentRun, Notification, VendorDiscovery, VendorCandidate, IntakeConversation] }
+query searchCases { fn: import { searchCases } from "@src/server/ops", entities: [Case, VendorAssignment] }
+query getEligibleVendors { fn: import { getEligibleVendors } from "@src/server/ops", entities: [Vendor, VendorAssignment, PropertyVendor] }
+query getSettings { fn: import { getSettings } from "@src/server/ops", entities: [Property, Unit, Vendor, PropertyVendor, User] }
+query getDiscoveryPanel { fn: import { getDiscoveryPanel } from "@src/server/ops", entities: [Case, VendorDiscovery, VendorCandidate, PropertyVendor] }
+query getFiberStatus { fn: import { getFiberStatus } from "@src/server/ops", entities: [VendorDiscovery] }
+query getMyJobs { fn: import { getMyJobs } from "@src/server/ops", entities: [Case, VendorAssignment, AppointmentSlot, SpendApproval] }
+
+// ───────────────────────── actions ─────────────────────────
+// Every action lists the case entities so that a change by anyone refreshes everyone's views.
+action markNotificationsRead { fn: import { markNotificationsRead } from "@src/server/ops", entities: [Notification] }
+action acknowledgeNotification { fn: import { acknowledgeNotification } from "@src/server/ops", entities: [Notification] }
+action updateMyNotifications { fn: import { updateMyNotifications } from "@src/server/ops", entities: [User] }
+action reportIssue { fn: import { reportIssue } from "@src/server/ops", entities: [Case, CaseEvent, Notification, IntakeConversation] }
+action sendIntakeMessage { fn: import { sendIntakeMessage } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
+action submitVoiceReport { fn: import { submitVoiceReport } from "@src/server/ops", entities: [Case, CaseEvent, Notification, IntakeConversation] }
+action recordVoiceEvent { fn: import { recordVoiceEvent } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
+action startVoiceIntake { fn: import { startVoiceIntake } from "@src/server/ops", entities: [] }
+action chooseVisitTime { fn: import { chooseVisitTime } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, VendorAssignment, Notification] }
+action declineVisitTimes { fn: import { declineVisitTimes } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }
+action confirmResolution { fn: import { confirmResolution } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action reopenCase { fn: import { reopenCase } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action fileUnfinishedChat { fn: import { fileUnfinishedChat } from "@src/server/ops", entities: [IntakeConversation, Case, CaseEvent, Notification] }
+action closeUnfinishedChat { fn: import { closeUnfinishedChat } from "@src/server/ops", entities: [IntakeConversation] }
+action cancelCase { fn: import { cancelCase } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
+action cancelVisit { fn: import { cancelVisit } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }
+action reviewTriage { fn: import { reviewTriage } from "@src/server/ops", entities: [Case, CaseEvent] }
+action assignVendor { fn: import { assignVendor } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification, AgentProposal] }
+action withdrawOffer { fn: import { withdrawOffer } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
+action decideSpend { fn: import { decideSpend } from "@src/server/ops", entities: [Case, CaseEvent, SpendApproval, AppointmentSlot, Notification] }
+action decideBudgetRequest { fn: import { decideBudgetRequest } from "@src/server/ops", entities: [Case, CaseEvent, SpendApproval, VendorAssignment, Notification] }
+action escalateCase { fn: import { escalateCase } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
+action resumeCase { fn: import { resumeCase } from "@src/server/ops", entities: [Case, CaseEvent] }
+action markHandledOutside { fn: import { markHandledOutside } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action closeUnverified { fn: import { closeUnverified } from "@src/server/ops", entities: [Case, CaseEvent, Notification] }
+action decideSuggestion { fn: import { decideSuggestion } from "@src/server/ops", entities: [AgentProposal, Case, CaseEvent, VendorAssignment, Notification] }
+action askRelayToReassess { fn: import { askRelayToReassess } from "@src/server/ops", entities: [Case, CaseEvent, AgentRun] }
+action updateProperty { fn: import { updateProperty } from "@src/server/ops", entities: [Property] }
+action addUnit { fn: import { addUnit } from "@src/server/ops", entities: [Unit, Property] }
+action saveVendor { fn: import { saveVendor } from "@src/server/ops", entities: [Vendor, PropertyVendor, Case, CaseEvent] }
+action setVendorApproved { fn: import { setVendorApproved } from "@src/server/ops", entities: [Vendor, PropertyVendor, Case, CaseEvent] }
+action requestVendorDiscovery { fn: import { requestVendorDiscovery } from "@src/server/ops", entities: [Case, CaseEvent, VendorDiscovery, Notification] }
+action reviewCandidate { fn: import { reviewCandidate } from "@src/server/ops", entities: [VendorCandidate, CaseEvent] }
+action onboardCandidate { fn: import { onboardCandidate } from "@src/server/ops", entities: [VendorCandidate, Vendor, PropertyVendor, Case, CaseEvent] }
+action respondToOffer { fn: import { respondToOffer } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, AppointmentSlot, SpendApproval, Notification] }
+action proposeVisitTimes { fn: import { proposeVisitTimes } from "@src/server/ops", entities: [Case, CaseEvent, AppointmentSlot, Notification] }
+action startWork { fn: import { startWork } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment] }
+action addProgressNote { fn: import { addProgressNote } from "@src/server/ops", entities: [CaseEvent] }
+action completeWork { fn: import { completeWork } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
+action requestMoreBudget { fn: import { requestMoreBudget } from "@src/server/ops", entities: [Case, CaseEvent, VendorAssignment, Notification] }
+
+// ───────────────────────── durable background work (pg-boss) ─────────────────────────
+// The coordinator: queued after any write that leaves a trigger on a case. Retries real errors.
+job coordinatorJob {
+  executor: PgBoss,
+  perform: {
+    fn: import { coordinatorJobFn } from "@src/server/agent/coordinator",
+    executorOptions: {
+      pgBoss: {=json { "retryLimit": 2, "retryDelay": 15, "expireInSeconds": 900 } json=}
+    }
+  },
+  entities: [Case]
+}
+// Vendor discovery (Fiber AI): one search per queued discovery, claimed so a duplicate job does nothing. Provider
+// errors are retried by the discovery itself with backoff; pg-boss retries only crashes.
+job vendorDiscoveryJob {
+  executor: PgBoss,
+  perform: {
+    fn: import { vendorDiscoveryJobFn } from "@src/server/vendors/discovery",
+    executorOptions: {
+      pgBoss: {=json { "retryLimit": 1, "retryDelay": 30, "expireInSeconds": 300 } json=}
+    }
+  },
+  entities: [VendorDiscovery]
+}
+// The intake agent's reply to a resident message. The request that saved the message has already returned.
+job intakeTurnJob {
+  executor: PgBoss,
+  perform: {
+    fn: import { intakeTurnJobFn } from "@src/server/agent/intake",
+    executorOptions: {
+      pgBoss: {=json { "retryLimit": 1, "retryDelay": 10, "expireInSeconds": 600 } json=}
+    }
+  },
+  entities: [IntakeConversation]
+}
+// Every minute: expire unanswered offers, send bounded reminders, resume lost work, deliver due email.
+job deadlineSweepJob {
+  executor: PgBoss,
+  perform: {
+    fn: import { runDeadlineSweep } from "@src/server/http"
+  },
+  schedule: {
+    cron: "* * * * *"
+  },
+  entities: [Case]
+}
+
+// ───────────────────────── plain HTTP ─────────────────────────
+api health {
+  fn: import { health } from "@src/server/http",
+  httpRoute: (GET, "/health"),
+  auth: false
+}
+// Test-only. Returns 404 unless RELAY_TEST_HOOKS=true outside production.
+api testHook {
+  fn: import { testHook } from "@src/server/http",
+  httpRoute: (POST, "/api/test/:hook"),
+  auth: false
+}
